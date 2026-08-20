@@ -726,6 +726,223 @@ app.post('/api/vod', async (req, res) => {
   }
 });
 
+// Pure Node.js native HLS segment engine (Runs on Vercel, Docker, VPS, Linux, Windows without yt-dlp or ffmpeg dependencies)
+async function runNativeHlsDownload(streamUrl, filepath, job) {
+  try {
+    let playlistUrl = streamUrl;
+    let text = await fetchKickText(playlistUrl);
+
+    if (!text || typeof text !== 'string') {
+      throw new Error('Failed to retrieve HLS playlist from stream URL');
+    }
+
+    // If master playlist with #EXT-X-STREAM-INF, select best variant
+    if (text.includes('#EXT-X-STREAM-INF:')) {
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+      let bestVariant = null;
+      let maxBw = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+          const next = lines[i + 1];
+          if (next && !next.startsWith('#')) {
+            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+            if (bw > maxBw || !bestVariant) {
+              maxBw = bw;
+              bestVariant = fullUrl;
+            }
+          }
+        }
+      }
+
+      if (bestVariant) {
+        playlistUrl = bestVariant;
+        text = await fetchKickText(playlistUrl);
+      }
+    }
+
+    // Parse segments
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const playlistBase = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+    const segments = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('#') || !line) continue;
+
+      let segUrl = line;
+      if (!segUrl.startsWith('http://') && !segUrl.startsWith('https://')) {
+        segUrl = new URL(segUrl, playlistBase).toString();
+      }
+      segments.push(segUrl);
+    }
+
+    if (segments.length === 0) {
+      // Direct stream / MP4 fallback
+      const response = await axios({
+        method: 'GET',
+        url: playlistUrl,
+        responseType: 'stream',
+        headers: {
+          'User-Agent': BROWSER_HEADERS['User-Agent'],
+          'Referer': 'https://kick.com/'
+        },
+        timeout: 30000
+      });
+
+      const writer = fs.createWriteStream(filepath);
+      let totalBytes = 0;
+      response.data.on('data', chunk => {
+        totalBytes += chunk.length;
+        job.rawBytes = totalBytes;
+        job.size = formatBytes(totalBytes);
+      });
+      response.data.pipe(writer);
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+      job.status = 'completed';
+      job.progress = 100;
+      job.eta = 'Done';
+      return;
+    }
+
+    const totalSegments = segments.length;
+    console.log(`[Job ${job.id}] Native HLS Engine starting download for ${totalSegments} segments.`);
+
+    const writer = fs.createWriteStream(filepath);
+    let completedCount = 0;
+    let totalBytesDownloaded = 0;
+    let lastBytes = 0;
+    let lastTime = Date.now();
+
+    const concurrency = 8;
+    let nextIndex = 0;
+    const downloadedBuffers = new Map();
+    let nextToWrite = 0;
+    let isAborted = false;
+
+    job.abort = () => {
+      isAborted = true;
+      try { writer.end(); } catch (e) {}
+    };
+
+    const flushBuffers = () => {
+      while (downloadedBuffers.has(nextToWrite)) {
+        const buf = downloadedBuffers.get(nextToWrite);
+        downloadedBuffers.delete(nextToWrite);
+        writer.write(buf);
+        nextToWrite++;
+      }
+    };
+
+    const downloadWorker = async () => {
+      while (nextIndex < totalSegments && !isAborted && job.status !== 'error') {
+        const idx = nextIndex++;
+        const segUrl = segments[idx];
+
+        let retries = 3;
+        let segBuffer = null;
+
+        while (retries > 0 && !isAborted) {
+          try {
+            const segRes = await axios.get(segUrl, {
+              responseType: 'arraybuffer',
+              headers: {
+                'User-Agent': BROWSER_HEADERS['User-Agent'],
+                'Referer': 'https://kick.com/',
+                'Origin': 'https://kick.com'
+              },
+              timeout: 25000
+            });
+            segBuffer = Buffer.from(segRes.data);
+            break;
+          } catch (e) {
+            retries--;
+            if (retries === 0) {
+              console.warn(`[Job ${job.id}] Segment ${idx} skipped after 3 retries:`, e.message);
+            } else {
+              await new Promise(r => setTimeout(r, 400));
+            }
+          }
+        }
+
+        if (segBuffer) {
+          downloadedBuffers.set(idx, segBuffer);
+          totalBytesDownloaded += segBuffer.length;
+          completedCount++;
+          job.rawBytes = totalBytesDownloaded;
+          job.size = formatBytes(totalBytesDownloaded);
+
+          flushBuffers();
+
+          const now = Date.now();
+          const elapsed = (now - lastTime) / 1000;
+          if (elapsed >= 0.7) {
+            const speedBps = (totalBytesDownloaded - lastBytes) / elapsed;
+            job.speed = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
+
+            const pct = Math.min(99, Math.round((completedCount / totalSegments) * 100));
+            job.progress = pct;
+
+            const remainingSegs = totalSegments - completedCount;
+            const avgTimePerSeg = elapsed / Math.max(1, (completedCount - (lastBytes ? 1 : 0)));
+            const remainingSec = Math.round(remainingSegs * avgTimePerSeg);
+            job.eta = formatDuration(remainingSec);
+
+            lastBytes = totalBytesDownloaded;
+            lastTime = now;
+          }
+        } else {
+          downloadedBuffers.set(idx, Buffer.alloc(0));
+          flushBuffers();
+        }
+      }
+    };
+
+    const workers = [];
+    for (let w = 0; w < Math.min(concurrency, totalSegments); w++) {
+      workers.push(downloadWorker());
+    }
+
+    await Promise.all(workers);
+    flushBuffers();
+    writer.end();
+
+    await new Promise(resolve => {
+      writer.on('finish', resolve);
+      setTimeout(resolve, 600);
+    });
+
+    if (isAborted) {
+      job.status = 'error';
+      job.error = 'Download was stopped by user.';
+      return;
+    }
+
+    if (fs.existsSync(filepath) && fs.statSync(filepath).size > 1024 * 50) {
+      job.rawBytes = fs.statSync(filepath).size;
+      job.size = formatBytes(job.rawBytes);
+      job.progress = 100;
+      job.status = 'completed';
+      job.speed = 'Done';
+      job.eta = 'Done';
+      console.log(`[Job ${job.id}] Native HLS download completed: ${job.size}`);
+    } else {
+      job.status = 'error';
+      job.error = 'File capture completed with empty stream data.';
+    }
+  } catch (err) {
+    console.error(`[Job ${job.id}] Native HLS failure:`, err.message);
+    job.status = 'error';
+    job.error = err.message || 'Stream download failed.';
+  }
+}
+
 // 3. POST /api/download/hls - Start Kick HLS download / live recording job
 app.post('/api/download/hls', async (req, res) => {
   const { url, title, isLive, quality, duration } = req.body;
@@ -743,7 +960,7 @@ app.post('/api/download/hls', async (req, res) => {
     type: isLive ? 'kick_live' : 'kick_vod',
     status: isLive ? 'recording' : 'downloading',
     progress: 0,
-    speed: '0.0x',
+    speed: '0.0 MB/s',
     size: '0 B',
     rawBytes: 0,
     eta: isLive ? 'LIVE' : '--:--',
@@ -760,139 +977,13 @@ app.post('/api/download/hls', async (req, res) => {
 
   jobs.set(jobId, job);
 
-  // We use yt-dlp for HLS/Kick streams because it handles segment fetching, TLS tokens, Cloudflare & headers reliably without exit code -2 errors
-  const ytdlpArgs = [
-    '--no-warnings',
-    '--newline',
-    '--concurrent-fragments', '8',
-    '-N', '8',
-    '--add-header', `User-Agent: ${BROWSER_HEADERS['User-Agent']}`,
-    '--add-header', 'Referer: https://kick.com/',
-    '--add-header', 'Origin: https://kick.com',
-    '--progress-template', '%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s',
-    '-o', filepath,
-    url
-  ];
-
-  try {
-    const proc = spawn('yt-dlp', ytdlpArgs);
-    job.process = proc;
-
-    let stderrLog = '';
-
-    // Track file size regularly
-    const statInterval = setInterval(() => {
-      const possiblePaths = [filepath, `${filepath}.part`, `${filepath}.temp.mp4`];
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-          try {
-            const stats = fs.statSync(p);
-            job.rawBytes = stats.size;
-            job.size = formatBytes(stats.size);
-            break;
-          } catch (e) {}
-        }
-      }
-      if (job.status === 'completed' || job.status === 'error') {
-        clearInterval(statInterval);
-      }
-    }, 800);
-
-    proc.stdout.on('data', (data) => {
-      const text = data.toString();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-      for (const line of lines) {
-        if (line.includes('|')) {
-          const parts = line.split('|');
-          if (parts.length >= 4) {
-            const [pctStr, speedStr, etaStr, sizeStr] = parts;
-            const pct = parseFloat(pctStr.replace('%', ''));
-            if (!isNaN(pct)) {
-              job.progress = Math.min(99, Math.max(0, Math.round(pct)));
-            }
-            if (speedStr && speedStr !== 'NA') job.speed = speedStr.trim();
-            if (etaStr && etaStr !== 'NA') job.eta = etaStr.trim();
-            if (sizeStr && sizeStr !== 'NA') job.size = sizeStr.trim();
-          }
-        }
-      }
-    });
-
-    proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderrLog += text;
-      if (stderrLog.length > 15000) {
-        stderrLog = stderrLog.slice(-10000);
-      }
-    });
-
-    proc.on('close', (code) => {
-      clearInterval(statInterval);
-      job.process = null;
-
-      // If file exists and is larger than 100KB, it's successful!
-      if (fs.existsSync(filepath) && fs.statSync(filepath).size > 1024 * 100) {
-        const finalStats = fs.statSync(filepath);
-        job.rawBytes = finalStats.size;
-        job.size = formatBytes(finalStats.size);
-        job.status = 'completed';
-        job.progress = 100;
-        job.eta = 'Done';
-        return;
-      }
-
-      if (code === 0) {
-        job.status = 'completed';
-        job.progress = 100;
-        job.eta = 'Done';
-      } else if (job.status !== 'completed') {
-        // If yt-dlp failed, attempt ffmpeg fallback with resilient HLS parameters
-        console.log(`[HLS Download] yt-dlp exited with ${code}, trying ffmpeg fallback...`);
-        
-        const fallbackArgs = [
-          '-y',
-          '-headers', `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`,
-          '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
-          '-i', url,
-          '-c', 'copy',
-          '-movflags', '+faststart',
-          filepath
-        ];
-
-        const ffFallback = spawn('ffmpeg', fallbackArgs);
-        job.process = ffFallback;
-
-        ffFallback.on('close', (ffCode) => {
-          job.process = null;
-          if (fs.existsSync(filepath) && fs.statSync(filepath).size > 1024 * 100) {
-            job.status = 'completed';
-            job.progress = 100;
-            job.eta = 'Done';
-          } else if (ffCode === 0) {
-            job.status = 'completed';
-            job.progress = 100;
-          } else {
-            job.status = 'error';
-            job.error = `Download could not complete (code ${code}). Stream may be expired or inaccessible.`;
-          }
-        });
-      }
-    });
-
-    proc.on('error', (err) => {
-      clearInterval(statInterval);
-      job.process = null;
-      job.status = 'error';
-      job.error = `Process execution error: ${err.message}`;
-    });
-
-    return res.json({ jobId, status: job.status, filename });
-  } catch (err) {
+  // Execute using pure Node.js native HLS engine
+  runNativeHlsDownload(url, filepath, job).catch(err => {
     job.status = 'error';
     job.error = err.message;
-    return res.status(500).json({ error: err.message });
-  }
+  });
+
+  return res.json({ jobId, status: job.status, filename });
 });
 
 // 4. POST /api/download/clip - Direct Kick clip download
