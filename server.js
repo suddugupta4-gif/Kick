@@ -760,106 +760,131 @@ app.post('/api/download/hls', async (req, res) => {
 
   jobs.set(jobId, job);
 
-  // Spawn ffmpeg with high-speed multi-request network parameters, -c copy and +faststart
-  const ffmpegArgs = [
-    '-y',
-    '-headers', `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`,
-    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-    '-reconnect', '1',
-    '-reconnect_streamed', '1',
-    '-reconnect_delay_max', '5',
-    '-http_multiple', '1',
-    '-multiple_requests', '1',
-    '-max_reload', '20',
-    '-probesize', '32M',
-    '-analyzeduration', '32M',
-    '-i', url,
-    '-c', 'copy',
-    '-movflags', '+faststart',
-    filepath
+  // We use yt-dlp for HLS/Kick streams because it handles segment fetching, TLS tokens, Cloudflare & headers reliably without exit code -2 errors
+  const ytdlpArgs = [
+    '--no-warnings',
+    '--newline',
+    '--concurrent-fragments', '8',
+    '-N', '8',
+    '--add-header', `User-Agent: ${BROWSER_HEADERS['User-Agent']}`,
+    '--add-header', 'Referer: https://kick.com/',
+    '--add-header', 'Origin: https://kick.com',
+    '--progress-template', '%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s',
+    '-o', filepath,
+    url
   ];
 
   try {
-    const ffProc = spawn('ffmpeg', ffmpegArgs);
-    job.process = ffProc;
+    const proc = spawn('yt-dlp', ytdlpArgs);
+    job.process = proc;
+
+    let stderrLog = '';
 
     // Track file size regularly
     const statInterval = setInterval(() => {
-      if (fs.existsSync(filepath)) {
-        try {
-          const stats = fs.statSync(filepath);
-          job.rawBytes = stats.size;
-          job.size = formatBytes(stats.size);
-        } catch (e) {}
+      const possiblePaths = [filepath, `${filepath}.part`, `${filepath}.temp.mp4`];
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          try {
+            const stats = fs.statSync(p);
+            job.rawBytes = stats.size;
+            job.size = formatBytes(stats.size);
+            break;
+          } catch (e) {}
+        }
       }
       if (job.status === 'completed' || job.status === 'error') {
         clearInterval(statInterval);
       }
     }, 800);
 
-    // Stderr parsing for progress
-    ffProc.stderr.on('data', (data) => {
+    proc.stdout.on('data', (data) => {
       const text = data.toString();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-      // Parse current timestamp from ffmpeg output: time=01:23:45.67
-      const timeMatch = text.match(/time=(\d{2}:\d{2}:\d{2}\.?\d*)/);
-      const speedMatch = text.match(/speed=\s*([\d\.]+)x/);
-      const sizeMatch = text.match(/size=\s*(\d+)kB/);
-
-      if (speedMatch) {
-        job.speed = `${speedMatch[1]}x`;
-      }
-
-      if (sizeMatch && !job.rawBytes) {
-        job.rawBytes = parseInt(sizeMatch[1], 10) * 1024;
-        job.size = formatBytes(job.rawBytes);
-      }
-
-      if (timeMatch) {
-        const currentSeconds = parseTimeToSeconds(timeMatch[1]);
-        if (job.isLive) {
-          job.progress = 'LIVE';
-          job.eta = formatDuration(currentSeconds); // Show recording length
-        } else if (job.totalDuration > 0) {
-          const pct = Math.min(99, Math.max(0, Math.round((currentSeconds / job.totalDuration) * 100)));
-          job.progress = pct;
-          const remainingSec = Math.max(0, (job.totalDuration - currentSeconds) / (parseFloat(job.speed) || 1));
-          job.eta = formatDuration(remainingSec);
+      for (const line of lines) {
+        if (line.includes('|')) {
+          const parts = line.split('|');
+          if (parts.length >= 4) {
+            const [pctStr, speedStr, etaStr, sizeStr] = parts;
+            const pct = parseFloat(pctStr.replace('%', ''));
+            if (!isNaN(pct)) {
+              job.progress = Math.min(99, Math.max(0, Math.round(pct)));
+            }
+            if (speedStr && speedStr !== 'NA') job.speed = speedStr.trim();
+            if (etaStr && etaStr !== 'NA') job.eta = etaStr.trim();
+            if (sizeStr && sizeStr !== 'NA') job.size = sizeStr.trim();
+          }
         }
       }
     });
 
-    ffProc.on('close', (code) => {
+    proc.stderr.on('data', (data) => {
+      const text = data.toString();
+      stderrLog += text;
+      if (stderrLog.length > 15000) {
+        stderrLog = stderrLog.slice(-10000);
+      }
+    });
+
+    proc.on('close', (code) => {
       clearInterval(statInterval);
       job.process = null;
 
-      if (fs.existsSync(filepath)) {
+      // If file exists and is larger than 100KB, it's successful!
+      if (fs.existsSync(filepath) && fs.statSync(filepath).size > 1024 * 100) {
         const finalStats = fs.statSync(filepath);
         job.rawBytes = finalStats.size;
         job.size = formatBytes(finalStats.size);
-
-        if (finalStats.size > 1024) {
-          job.status = 'completed';
-          job.progress = 100;
-          job.eta = 'Done';
-          return;
-        }
+        job.status = 'completed';
+        job.progress = 100;
+        job.eta = 'Done';
+        return;
       }
 
       if (code === 0) {
         job.status = 'completed';
         job.progress = 100;
+        job.eta = 'Done';
       } else if (job.status !== 'completed') {
-        job.status = 'error';
-        job.error = `FFmpeg process exited with code ${code}. Check if the stream is still live or URL is accessible.`;
+        // If yt-dlp failed, attempt ffmpeg fallback with resilient HLS parameters
+        console.log(`[HLS Download] yt-dlp exited with ${code}, trying ffmpeg fallback...`);
+        
+        const fallbackArgs = [
+          '-y',
+          '-headers', `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`,
+          '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,hls',
+          '-i', url,
+          '-c', 'copy',
+          '-movflags', '+faststart',
+          filepath
+        ];
+
+        const ffFallback = spawn('ffmpeg', fallbackArgs);
+        job.process = ffFallback;
+
+        ffFallback.on('close', (ffCode) => {
+          job.process = null;
+          if (fs.existsSync(filepath) && fs.statSync(filepath).size > 1024 * 100) {
+            job.status = 'completed';
+            job.progress = 100;
+            job.eta = 'Done';
+          } else if (ffCode === 0) {
+            job.status = 'completed';
+            job.progress = 100;
+          } else {
+            job.status = 'error';
+            job.error = `Download could not complete (code ${code}). Stream may be expired or inaccessible.`;
+          }
+        });
       }
     });
 
-    ffProc.on('error', (err) => {
+    proc.on('error', (err) => {
       clearInterval(statInterval);
       job.process = null;
       job.status = 'error';
-      job.error = `FFmpeg execution error: ${err.message}`;
+      job.error = `Process execution error: ${err.message}`;
     });
 
     return res.json({ jobId, status: job.status, filename });
