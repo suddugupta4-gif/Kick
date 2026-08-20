@@ -1360,6 +1360,132 @@ app.get('/api/file/:jobId', (req, res) => {
   }
 });
 
+// Direct HLS streaming download endpoint (100% compatible with Vercel serverless, Render, VPS, and Docker)
+app.get('/api/stream-hls', async (req, res) => {
+  const targetUrl = req.query.url;
+  const filename = req.query.filename || 'stream.mp4';
+  const cleanFilename = (filename.endsWith('.mp4') ? filename : `${filename}.mp4`).replace(/[^\w\s.-]/gi, '_');
+
+  if (!targetUrl) {
+    return res.status(400).send('Missing stream URL');
+  }
+
+  try {
+    let playlistUrl = targetUrl;
+    let text = await fetchKickText(playlistUrl);
+
+    if (!text || typeof text !== 'string') {
+      return res.status(500).send('Could not fetch stream playlist');
+    }
+
+    // Handle master playlist
+    if (text.includes('#EXT-X-STREAM-INF:')) {
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+      let bestVariant = null;
+      let maxBw = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+          const next = lines[i + 1];
+          if (next && !next.startsWith('#')) {
+            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+            if (bw > maxBw || !bestVariant) {
+              maxBw = bw;
+              bestVariant = fullUrl;
+            }
+          }
+        }
+      }
+
+      if (bestVariant) {
+        playlistUrl = bestVariant;
+        text = await fetchKickText(playlistUrl);
+      }
+    }
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const playlistBase = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+    const segments = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('#') || !line) continue;
+      let segUrl = line;
+      if (!segUrl.startsWith('http://') && !segUrl.startsWith('https://')) {
+        segUrl = new URL(segUrl, playlistBase).toString();
+      }
+      segments.push(segUrl);
+    }
+
+    if (segments.length === 0) {
+      // Direct stream fallback
+      return res.redirect(playlistUrl);
+    }
+
+    console.log(`[Stream-HLS] Starting real-time stream pipe for ${segments.length} segments to client (${cleanFilename})`);
+
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Content-Disposition': `attachment; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    let clientDisconnected = false;
+    req.on('close', () => {
+      clientDisconnected = true;
+    });
+
+    // Stream segments sequentially to response
+    for (let i = 0; i < segments.length; i++) {
+      if (clientDisconnected) break;
+      const segUrl = segments[i];
+
+      let attempts = 3;
+      while (attempts > 0 && !clientDisconnected) {
+        try {
+          const segRes = await axios.get(segUrl, {
+            responseType: 'arraybuffer',
+            headers: {
+              'User-Agent': BROWSER_HEADERS['User-Agent'],
+              'Referer': 'https://kick.com/',
+              'Origin': 'https://kick.com'
+            },
+            timeout: 15000
+          });
+
+          if (!clientDisconnected) {
+            res.write(Buffer.from(segRes.data));
+          }
+          break;
+        } catch (e) {
+          attempts--;
+          if (attempts === 0) {
+            console.warn(`[Stream-HLS] Skipped segment ${i}:`, e.message);
+          } else {
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+      }
+    }
+
+    if (!clientDisconnected) {
+      res.end();
+    }
+  } catch (err) {
+    console.error('Stream-HLS error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).send('Stream download failed: ' + err.message);
+    }
+  }
+});
+
 // 9. GET /api/thumbnail - Proxy thumbnail download
 app.get('/api/thumbnail', async (req, res) => {
   const imageUrl = req.query.url;

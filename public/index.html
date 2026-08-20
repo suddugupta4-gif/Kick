@@ -1966,31 +1966,73 @@
       clearError();
       resetProgress();
       progressBox.style.display = 'block';
-      btnStartDownload.disabled = true;
 
       try {
-        let endpoint = '';
-        let payload = {};
-
         if (currentMedia.platform === 'kick') {
           if (currentMedia.type === 'clip') {
-            endpoint = '/api/download/clip';
-            payload = {
-              clipUrl: currentMedia.clipUrl,
-              title: currentMedia.title
-            };
-          } else {
-            // Live or VOD
-            endpoint = '/api/download/hls';
-            payload = {
-              url: (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl,
+            const clipDlUrl = currentMedia.clipUrl;
+            const a = document.createElement('a');
+            a.href = clipDlUrl;
+            a.download = `${(currentMedia.title || 'kick_clip').replace(/[^a-zA-Z0-9_\-]/g, '_')}.mp4`;
+            a.target = '_blank';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            showToast('🚀 Downloading Kick Clip directly...', 'success');
+            btnStartDownload.disabled = false;
+            return;
+          }
+
+          // For Kick VODs and Streams:
+          const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl;
+          const cleanTitle = (currentMedia.title || 'kick_stream').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 60);
+          const directStreamUrl = `/api/stream-hls?url=${encodeURIComponent(streamUrl)}&filename=${encodeURIComponent(cleanTitle + '.mp4')}`;
+
+          // Trigger native browser stream download (Works on Vercel, Cloud Run, Mobile, Desktop)
+          const dlLink = document.createElement('a');
+          dlLink.href = directStreamUrl;
+          dlLink.download = `${cleanTitle}.mp4`;
+          dlLink.target = '_blank';
+          document.body.appendChild(dlLink);
+          dlLink.click();
+          dlLink.remove();
+
+          progressStatusLabel.textContent = 'Streaming to Browser...';
+          progressPercentageLabel.textContent = 'READY';
+          progressBarFill.style.width = '100%';
+          metricStatus.textContent = 'STREAMING';
+          metricSpeed.textContent = 'HIGH SPEED';
+          metricSize.textContent = 'DYNAMIC';
+          metricEta.textContent = 'CHECK BROWSER';
+
+          showToast('📥 Download started in your browser / notification bar!', 'success');
+
+          // Also trigger background packaging job in parallel if running on a persistent server
+          fetch('/api/download/hls', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: streamUrl,
               title: currentMedia.title,
               isLive: currentMedia.isLive,
               quality: selectedQuality ? selectedQuality.quality : 'best',
               duration: currentMedia.duration || 0
-            };
-          }
-        } else if (currentMedia.platform === 'youtube') {
+            })
+          }).then(res => res.json()).then(data => {
+            if (data && data.jobId) {
+              activeJobId = data.jobId;
+              startJobPolling(activeJobId);
+            }
+          }).catch(() => {});
+
+          btnStartDownload.disabled = false;
+          return;
+        }
+
+        let endpoint = '';
+        let payload = {};
+
+        if (currentMedia.platform === 'youtube') {
           endpoint = '/api/download/youtube';
           payload = {
             url: currentMedia.url,
@@ -2022,7 +2064,6 @@
           showToast('⚡ High-speed stream packaging started...', 'info');
         }
 
-        // Start polling job status
         startJobPolling(activeJobId);
 
       } catch (err) {
