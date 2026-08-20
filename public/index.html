@@ -1,0 +1,2328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>StreamDrop — Kick.com & YouTube Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-main: #0a0d14;
+      --bg-card: #121824;
+      --bg-card-hover: #182030;
+      --bg-input: #0e131d;
+      --border-subtle: #1e293b;
+      --border-active: #53fc18;
+      
+      --kick-green: #53fc18;
+      --kick-green-dark: #3ecc0d;
+      --kick-glow: rgba(83, 252, 24, 0.22);
+      
+      --yt-red: #ff3333;
+      --yt-glow: rgba(255, 51, 51, 0.25);
+      
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --accent-blue: #38bdf8;
+      --accent-purple: #a855f7;
+      
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* Background Glow Effects */
+    .bg-glow-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .bg-glow-1 {
+      position: absolute;
+      top: -15%;
+      left: 20%;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(83, 252, 24, 0.07) 0%, rgba(10, 13, 20, 0) 70%);
+      filter: blur(80px);
+    }
+
+    .bg-glow-2 {
+      position: absolute;
+      top: 40%;
+      right: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.05) 0%, rgba(10, 13, 20, 0) 70%);
+      filter: blur(80px);
+    }
+
+    /* Main Container */
+    .app-wrapper {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 16px 60px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+
+    /* Sticky Navbar */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(10, 13, 20, 0.85);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border-subtle);
+      margin: 0 -16px 28px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .logo-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border: 1px solid rgba(83, 252, 24, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px var(--kick-glow);
+    }
+
+    .logo-title {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .logo-accent {
+      color: var(--kick-green);
+    }
+
+    .nav-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-pill {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .badge-kick {
+      background: rgba(83, 252, 24, 0.12);
+      color: var(--kick-green);
+      border: 1px solid rgba(83, 252, 24, 0.3);
+    }
+
+    .badge-yt {
+      background: rgba(255, 51, 51, 0.12);
+      color: #ff5555;
+      border: 1px solid rgba(255, 51, 51, 0.3);
+    }
+
+    /* Hero Section */
+    .hero-section {
+      text-align: center;
+      margin-bottom: 28px;
+      padding: 10px 0;
+    }
+
+    .hero-headline {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    @media (min-width: 640px) {
+      .hero-headline {
+        font-size: 40px;
+      }
+    }
+
+    .hero-headline span {
+      background: linear-gradient(90deg, var(--kick-green), #a3e635, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+      max-width: 620px;
+      margin: 0 auto 18px;
+    }
+
+    .feature-pills {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .feature-pill {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .feature-pill svg {
+      width: 14px;
+      height: 14px;
+      color: var(--kick-green);
+    }
+
+    /* Input Box Card */
+    .input-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 12px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+      margin-bottom: 24px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-card:focus-within {
+      border-color: rgba(83, 252, 24, 0.5);
+      box-shadow: 0 0 24px var(--kick-glow);
+    }
+
+    .input-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    @media (min-width: 640px) {
+      .input-wrapper {
+        flex-direction: row;
+        align-items: center;
+      }
+    }
+
+    .input-field-box {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0 14px;
+    }
+
+    .input-icon {
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      margin-right: 10px;
+    }
+
+    .url-input {
+      width: 100%;
+      height: 48px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-main);
+      font-size: 15px;
+      font-family: inherit;
+    }
+
+    .url-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .input-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon-action {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .btn-icon-action:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-paste {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+
+    .btn-paste:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-detect {
+      height: 48px;
+      background: var(--kick-green);
+      color: #000;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 0 24px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px var(--kick-glow);
+      transition: transform 0.15s, background-color 0.15s, box-shadow 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-detect:hover {
+      background: #4ae015;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(83, 252, 24, 0.4);
+    }
+
+    .btn-detect:active {
+      transform: translateY(0);
+    }
+
+    .btn-detect:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Quick Example Chips */
+    .example-chips {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 0 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .chip-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      transition: all 0.15s;
+    }
+
+    .chip-btn:hover {
+      color: var(--kick-green);
+      border-color: rgba(83, 252, 24, 0.3);
+      background: rgba(83, 252, 24, 0.05);
+    }
+
+    /* Loader / Spinner */
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(0, 0, 0, 0.2);
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    .spinner-light {
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: var(--kick-green);
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Pulse animation for Live badge */
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.15); }
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #ff3333;
+      border-radius: 50%;
+      display: inline-block;
+      animation: livePulse 1.4s ease-in-out infinite;
+    }
+
+    .live-dot-green {
+      background-color: var(--kick-green);
+    }
+
+    /* Results Section Card */
+    .result-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      display: none;
+      animation: fadeIn 0.25s ease-out;
+      overflow: hidden;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-header {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 20px;
+      width: 100%;
+    }
+
+    @media (min-width: 640px) {
+      .result-header {
+        flex-direction: row;
+        align-items: stretch;
+      }
+    }
+
+    .thumbnail-box {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0f172a;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    @media (min-width: 640px) {
+      .thumbnail-box {
+        width: 250px;
+        max-width: 250px;
+      }
+    }
+
+    .thumbnail-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .thumb-badge {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(4px);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .meta-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .meta-tags {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .meta-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      line-height: 1.38;
+      margin-bottom: 8px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    @media (min-width: 640px) {
+      .meta-title {
+        font-size: 18px;
+        line-height: 1.35;
+      }
+    }
+
+    .meta-channel {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .meta-channel span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .meta-channel svg {
+      width: 15px;
+      height: 15px;
+      color: var(--kick-green);
+      flex-shrink: 0;
+    }
+
+    /* Tabs for YouTube (Video vs MP3) */
+    .tab-switcher {
+      display: flex;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 4px;
+      margin-bottom: 16px;
+      gap: 4px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .tab-btn.active {
+      background: rgba(83, 252, 24, 0.15);
+      color: var(--kick-green);
+      border: 1px solid rgba(83, 252, 24, 0.3);
+    }
+
+    .tab-btn:hover:not(.active) {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Quality Options Grid */
+    .quality-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .quality-option {
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      position: relative;
+      transition: all 0.15s;
+    }
+
+    .quality-option:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .quality-option.selected {
+      border-color: var(--kick-green);
+      background: rgba(83, 252, 24, 0.08);
+      box-shadow: 0 0 12px var(--kick-glow);
+    }
+
+    .quality-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .quality-info {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .best-tag {
+      font-size: 9px;
+      font-weight: 800;
+      background: var(--kick-green);
+      color: #000;
+      padding: 1px 5px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    /* Action Buttons Row */
+    .action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .btn-download-primary {
+      flex: 1;
+      min-width: 180px;
+      height: 48px;
+      background: var(--kick-green);
+      color: #000;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 0 20px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px var(--kick-glow);
+      transition: all 0.15s;
+    }
+
+    .btn-download-primary:hover {
+      background: #4ae015;
+      transform: translateY(-1px);
+    }
+
+    .btn-thumb-action {
+      height: 48px;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent-blue);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-md);
+      padding: 0 16px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .btn-thumb-action:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--accent-blue);
+    }
+
+    .btn-stop-recording {
+      height: 48px;
+      background: rgba(255, 51, 51, 0.15);
+      color: #ff5555;
+      border: 1px solid rgba(255, 51, 51, 0.4);
+      font-size: 14px;
+      font-weight: 700;
+      border-radius: var(--radius-md);
+      padding: 0 18px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .btn-stop-recording:hover {
+      background: rgba(255, 51, 51, 0.25);
+      border-color: #ff5555;
+    }
+
+    .btn-secondary-action {
+      height: 48px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      border: 1px solid var(--border-subtle);
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-md);
+      padding: 0 16px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .btn-secondary-action:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: var(--text-muted);
+    }
+
+    /* Live / Progress Monitor Card */
+    .progress-box {
+      margin-top: 20px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: none;
+    }
+
+    .progress-box-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .progress-title {
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: #1e293b;
+      border-radius: 9999px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #53fc18, #38bdf8);
+      border-radius: 9999px;
+      transition: width 0.3s ease;
+      background-size: 30px 30px;
+    }
+
+    .progress-bar-fill.animated {
+      background-image: linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.15) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, 0.15) 50%,
+        rgba(255, 255, 255, 0.15) 75%,
+        transparent 75%,
+        transparent
+      );
+      animation: progressStripes 1s linear infinite;
+    }
+
+    @keyframes progressStripes {
+      from { background-position: 0 0; }
+      to { background-position: 30px 0; }
+    }
+
+    .progress-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      text-align: center;
+    }
+
+    .metric-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+      padding: 8px 4px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .metric-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+    }
+
+    /* Offline Channel Profile View */
+    .offline-view {
+      display: none;
+      margin-top: 10px;
+    }
+
+    .channel-profile-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 20px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    @media (min-width: 540px) {
+      .channel-profile-card {
+        flex-direction: row;
+        align-items: center;
+      }
+    }
+
+    .profile-avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 2px solid var(--border-subtle);
+      object-fit: cover;
+      background: #0f172a;
+      flex-shrink: 0;
+    }
+
+    .profile-info {
+      flex: 1;
+    }
+
+    .profile-name {
+      font-size: 22px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .profile-bio {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .offline-tab-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+    }
+
+    .offline-tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .offline-tab-btn.active {
+      background: rgba(83, 252, 24, 0.12);
+      color: var(--kick-green);
+    }
+
+    .vods-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .vod-item-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .vod-item-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(83, 252, 24, 0.4);
+    }
+
+    .vod-item-thumb-box {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0f172a;
+    }
+
+    .vod-item-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .vod-item-content {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: space-between;
+    }
+
+    .vod-item-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .vod-item-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Error Banner */
+    .error-banner {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      display: none;
+      align-items: flex-start;
+      gap: 12px;
+      color: #fca5a5;
+    }
+
+    .error-title {
+      font-weight: 700;
+      font-size: 14px;
+      color: #ef4444;
+      margin-bottom: 2px;
+    }
+
+    .error-msg {
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* Toast System */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto;
+      animation: toastIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 340px;
+    }
+
+    .toast-success {
+      border-left: 4px solid var(--kick-green);
+    }
+
+    .toast-error {
+      border-left: 4px solid #ef4444;
+    }
+
+    @keyframes toastIn {
+      from { transform: translateX(30px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Features Info Cards at Bottom */
+    .features-info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 36px;
+    }
+
+    .info-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+    }
+
+    .info-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .info-card-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--kick-green);
+    }
+
+    .info-card-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .info-card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 48px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 24px;
+    }
+
+    /* Mobile Responsive Optimizations for Result Card */
+    @media (max-width: 640px) {
+      .result-card {
+        padding: 14px;
+        border-radius: var(--radius-lg);
+        margin-bottom: 18px;
+      }
+      .result-header {
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .thumbnail-box {
+        max-width: 100%;
+        border-radius: 8px;
+      }
+      .meta-title {
+        font-size: 15px;
+        line-height: 1.35;
+        margin-bottom: 6px;
+      }
+      .meta-channel {
+        font-size: 12px;
+      }
+      .action-row {
+        flex-direction: column;
+        gap: 8px;
+      }
+      .btn-download-primary, .btn-secondary-action, .btn-thumb-action, .btn-stop-recording {
+        width: 100%;
+        min-width: 100%;
+        justify-content: center;
+        height: 44px;
+        font-size: 14px;
+      }
+      .quality-grid {
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 6px;
+      }
+      .quality-option {
+        padding: 8px 10px;
+      }
+      .quality-name {
+        font-size: 13px;
+      }
+      .progress-metrics {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+      }
+      .metric-card {
+        padding: 8px 10px;
+      }
+      .metric-val {
+        font-size: 13px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Ambient Glow -->
+  <div class="bg-glow-container" id="glow-container">
+    <div class="bg-glow-1"></div>
+    <div class="bg-glow-2"></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Main Container -->
+  <div class="app-wrapper" id="app-root">
+
+    <!-- Sticky Navbar -->
+    <header class="navbar" id="main-nav">
+      <a href="#" class="logo-group" id="nav-logo">
+        <div class="logo-icon-box" id="logo-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#53fc18" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v14M19 9l-7 7-7-7"/>
+            <path d="M2 20h20"/>
+          </svg>
+        </div>
+        <div class="logo-title">
+          Stream<span class="logo-accent">Drop</span>
+        </div>
+      </a>
+
+      <div class="nav-badges" id="nav-badges">
+        <span class="badge-pill badge-kick">
+          <span class="live-dot live-dot-green"></span> Kick.com
+        </span>
+        <span class="badge-pill badge-yt">
+          <span class="live-dot"></span> YouTube
+        </span>
+      </div>
+    </header>
+
+    <!-- Hero Header -->
+    <section class="hero-section" id="hero-header">
+      <h1 class="hero-headline">
+        Instant Media & <span>Live Stream</span> Downloader
+      </h1>
+      <p class="hero-subtitle">
+        Lossless HLS stream capture, Kick VODs & clips, YouTube 4K/1080p, and high-bitrate MP3 extraction.
+      </p>
+
+      <div class="feature-pills" id="feature-pills">
+        <span class="feature-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          No Re-encoding (c:copy)
+        </span>
+        <span class="feature-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Live Stream Capture
+        </span>
+        <span class="feature-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          320kbps MP3 Audio
+        </span>
+        <span class="feature-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          HD Thumbnails
+        </span>
+      </div>
+    </section>
+
+    <!-- Input Card -->
+    <section class="input-card" id="input-container">
+      <div class="input-wrapper">
+        <div class="input-field-box">
+          <div class="input-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            id="url-input" 
+            class="url-input" 
+            placeholder="Paste Kick channel, VOD, clip URL or YouTube link..." 
+            autocomplete="off" 
+            spellcheck="false"
+          />
+          <div class="input-actions">
+            <button type="button" class="btn-icon-action" id="btn-clear" title="Clear input" style="display: none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <button type="button" class="btn-paste" id="btn-paste" title="Paste from clipboard">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Paste
+            </button>
+          </div>
+        </div>
+
+        <button type="button" class="btn-detect" id="btn-detect">
+          <span id="btn-detect-text">Detect Media</span>
+          <svg id="btn-detect-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <!-- Quick presets -->
+      <div class="example-chips" id="example-chips">
+        <span>Try:</span>
+        <button type="button" class="chip-btn" data-preset="kick.com/xqc">kick.com/xqc</button>
+        <button type="button" class="chip-btn" data-preset="kick.com/adinross">adinross</button>
+        <button type="button" class="chip-btn" data-preset="https://www.youtube.com/watch?v=dQw4w9WgXcQ">youtube.com</button>
+      </div>
+    </section>
+
+    <!-- Error Banner -->
+    <div class="error-banner" id="error-banner" style="display: none; flex-direction: column; align-items: flex-start; gap: 12px;">
+      <div style="display: flex; gap: 12px; align-items: flex-start; width: 100%;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div style="flex: 1;">
+          <div class="error-title" id="error-title">Detection Failed</div>
+          <div class="error-msg" id="error-msg">Something went wrong.</div>
+        </div>
+      </div>
+      <div id="error-suggestions" style="display: none; width: 100%; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; margin-top: 4px;">
+        <div style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;" id="error-suggestions-title">
+          Available streams from this channel:
+        </div>
+        <div id="error-suggestions-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;"></div>
+      </div>
+    </div>
+
+    <!-- Detection Result Card -->
+    <section class="result-card" id="result-card">
+      <div class="result-header">
+        <div class="thumbnail-box" id="result-thumb-box">
+          <img src="" alt="Thumbnail" class="thumbnail-img" id="result-thumb-img" />
+          <span class="thumb-badge" id="result-duration-badge">00:00</span>
+        </div>
+
+        <div class="meta-box">
+          <div>
+            <div class="meta-tags" id="meta-tags-container">
+              <!-- Platform badge rendered here -->
+            </div>
+            <h2 class="meta-title" id="result-title">Stream Title</h2>
+            <div class="meta-channel" id="result-channel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span id="result-channel-name">Channel Name</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- YouTube Mode Tabs (Video / MP3) -->
+      <div class="tab-switcher" id="yt-tab-switcher" style="display: none;">
+        <button type="button" class="tab-btn active" id="tab-yt-video" data-tab="video">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Video (MP4)
+        </button>
+        <button type="button" class="tab-btn" id="tab-yt-audio" data-tab="audio">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          Audio Only (MP3)
+        </button>
+      </div>
+
+      <!-- Quality Selection Grid -->
+      <div id="quality-container">
+        <div class="quality-section-title">
+          <span>Select Quality</span>
+          <span id="quality-hint" style="color: var(--text-dim); font-size: 11px;">Highest quality pre-selected</span>
+        </div>
+        <div class="quality-grid" id="quality-grid">
+          <!-- Quality items rendered here dynamically -->
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-row">
+        <button type="button" class="btn-download-primary" id="btn-start-download">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="btn-download-label">Download MP4</span>
+        </button>
+
+        <button type="button" class="btn-secondary-action" id="btn-copy-stream" style="display: none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Copy Stream URL (VLC)
+        </button>
+
+        <button type="button" class="btn-thumb-action" id="btn-download-thumb">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Save Thumbnail
+        </button>
+
+        <button type="button" class="btn-stop-recording" id="btn-stop-recording">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop & Finalize MP4
+        </button>
+      </div>
+
+      <!-- Realtime Progress & Recording Monitor -->
+      <div class="progress-box" id="progress-box">
+        <div class="progress-box-header">
+          <div class="progress-title" id="progress-title-text">
+            <span class="spinner spinner-light" id="progress-spinner"></span>
+            <span id="progress-status-label">Downloading...</span>
+          </div>
+          <div id="progress-percentage-label" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: var(--kick-green);">
+            0%
+          </div>
+        </div>
+
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill animated" id="progress-bar-fill"></div>
+        </div>
+
+        <div class="progress-metrics">
+          <div class="metric-card">
+            <div class="metric-label">Status</div>
+            <div class="metric-val" id="metric-status">Working</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Speed</div>
+            <div class="metric-val" id="metric-speed">--</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">File Size</div>
+            <div class="metric-val" id="metric-size">0 B</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">ETA / Length</div>
+            <div class="metric-val" id="metric-eta">--:--</div>
+          </div>
+        </div>
+
+        <!-- Finish Download Direct Button -->
+        <div id="completed-actions" style="display: none; margin-top: 16px; background: rgba(83, 252, 24, 0.08); border: 1px solid rgba(83, 252, 24, 0.3); border-radius: var(--radius-lg); padding: 14px; text-align: center;">
+          <div style="font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--kick-green)" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Video Packaged & Ready!</span>
+          </div>
+          <a href="#" id="btn-save-finished-file" class="btn-download-primary" style="text-decoration: none; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 700;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span id="btn-save-file-label">💾 Save Video to Phone / Device</span>
+          </a>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
+            Tap the green button above to save the MP4 directly into your phone's <strong>Downloads</strong> or <strong>Files</strong> folder.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Offline Channel View -->
+    <section class="offline-view" id="offline-view">
+      <div class="channel-profile-card" id="channel-profile-card">
+        <img src="" alt="Avatar" class="profile-avatar" id="offline-avatar" />
+        <div class="profile-info">
+          <div class="profile-name">
+            <span id="offline-channel-name">Streamer</span>
+            <span class="badge-pill" style="background: rgba(255, 255, 255, 0.08); color: var(--text-muted); border: 1px solid var(--border-subtle);">
+              Offline
+            </span>
+          </div>
+          <div class="profile-bio" id="offline-bio">No bio available.</div>
+        </div>
+      </div>
+
+      <div class="offline-tab-row">
+        <button type="button" class="offline-tab-btn active" id="tab-offline-vods" data-channel-tab="vods">
+          Recent VODs (<span id="vod-count">0</span>)
+        </button>
+        <button type="button" class="offline-tab-btn" id="tab-offline-clips" data-channel-tab="clips">
+          Top Clips (<span id="clip-count">0</span>)
+        </button>
+      </div>
+
+      <div class="vods-grid" id="offline-grid">
+        <!-- VODs or clips rendered here -->
+      </div>
+    </section>
+
+    <!-- App Highlights / Info Cards -->
+    <section class="features-info-grid" id="info-grid">
+      <div class="info-card">
+        <div class="info-card-header">
+          <div class="info-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+          </div>
+          <div class="info-card-title">Kick Live Recording</div>
+        </div>
+        <div class="info-card-desc">
+          Records live HLS video streams into seekable MP4 with faststart. Stop recording at any time to immediately save your clip.
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-header">
+          <div class="info-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+          </div>
+          <div class="info-card-title">Lossless Stream Copy</div>
+        </div>
+        <div class="info-card-desc">
+          Uses ffmpeg stream copy (<code style="color: var(--kick-green);">-c copy</code>) to preserve 100% original video & audio quality with zero CPU overhead.
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-header">
+          <div class="info-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"/></svg>
+          </div>
+          <div class="info-card-title">YouTube 4K & MP3</div>
+        </div>
+        <div class="info-card-desc">
+          Powered by yt-dlp to download YouTube videos up to 4K 60fps or extract crystal-clear 320kbps MP3 audio files.
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer" id="app-footer">
+      StreamDrop — Fast & Lightweight Media Utility. Deploy-ready for Vercel Free Serverless & Render Docker.
+    </footer>
+
+  </div>
+
+  <script>
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // StreamDrop Client Application Logic
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // State
+    let currentMedia = null;
+    let selectedQuality = null;
+    let selectedYtTab = 'video'; // 'video' | 'audio'
+    let activeJobId = null;
+    let pollTimer = null;
+    let channelOfflineData = null;
+    let currentOfflineTab = 'vods'; // 'vods' | 'clips'
+
+    // DOM Elements
+    const urlInput = document.getElementById('url-input');
+    const btnDetect = document.getElementById('btn-detect');
+    const btnDetectText = document.getElementById('btn-detect-text');
+    const btnDetectIcon = document.getElementById('btn-detect-icon');
+    const btnClear = document.getElementById('btn-clear');
+    const btnPaste = document.getElementById('btn-paste');
+    const errorBanner = document.getElementById('error-banner');
+    const errorTitle = document.getElementById('error-title');
+    const errorMsg = document.getElementById('error-msg');
+    
+    // Result Card Elements
+    const resultCard = document.getElementById('result-card');
+    const resultThumbImg = document.getElementById('result-thumb-img');
+    const resultDurationBadge = document.getElementById('result-duration-badge');
+    const metaTagsContainer = document.getElementById('meta-tags-container');
+    const resultTitle = document.getElementById('result-title');
+    const resultChannelName = document.getElementById('result-channel-name');
+    const ytTabSwitcher = document.getElementById('yt-tab-switcher');
+    const tabYtVideo = document.getElementById('tab-yt-video');
+    const tabYtAudio = document.getElementById('tab-yt-audio');
+    const qualityContainer = document.getElementById('quality-container');
+    const qualityGrid = document.getElementById('quality-grid');
+    const btnStartDownload = document.getElementById('btn-start-download');
+    const btnDownloadLabel = document.getElementById('btn-download-label');
+    const btnCopyStream = document.getElementById('btn-copy-stream');
+    const btnDownloadThumb = document.getElementById('btn-download-thumb');
+    const btnStopRecording = document.getElementById('btn-stop-recording');
+
+    // Progress Elements
+    const progressBox = document.getElementById('progress-box');
+    const progressStatusLabel = document.getElementById('progress-status-label');
+    const progressPercentageLabel = document.getElementById('progress-percentage-label');
+    const progressBarFill = document.getElementById('progress-bar-fill');
+    const metricStatus = document.getElementById('metric-status');
+    const metricSpeed = document.getElementById('metric-speed');
+    const metricSize = document.getElementById('metric-size');
+    const metricEta = document.getElementById('metric-eta');
+    const completedActions = document.getElementById('completed-actions');
+    const btnSaveFinishedFile = document.getElementById('btn-save-finished-file');
+
+    // Offline Channel Elements
+    const offlineView = document.getElementById('offline-view');
+    const offlineAvatar = document.getElementById('offline-avatar');
+    const offlineChannelName = document.getElementById('offline-channel-name');
+    const offlineBio = document.getElementById('offline-bio');
+    const tabOfflineVods = document.getElementById('tab-offline-vods');
+    const tabOfflineClips = document.getElementById('tab-offline-clips');
+    const vodCount = document.getElementById('vod-count');
+    const clipCount = document.getElementById('clip-count');
+    const offlineGrid = document.getElementById('offline-grid');
+
+    // Toast Notifications
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'success' ? 'toast-success' : (type === 'error' ? 'toast-error' : '')}`;
+      toast.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          ${type === 'success' ? '<polyline points="20 6 9 17 4 12"/>' : (type === 'error' ? '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>' : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>')}
+        </svg>
+        <span>${message}</span>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    function showError(title, message, availableVods = [], channelSlug = '') {
+      errorTitle.textContent = title || 'Error';
+      errorMsg.textContent = message || 'An unexpected error occurred.';
+
+      const suggestionsBox = document.getElementById('error-suggestions');
+      const suggestionsGrid = document.getElementById('error-suggestions-grid');
+      const suggestionsTitle = document.getElementById('error-suggestions-title');
+
+      if (availableVods && availableVods.length > 0) {
+        suggestionsTitle.innerHTML = `Active streams from <strong>${channelSlug || 'this streamer'}</strong> (click to download):`;
+        suggestionsGrid.innerHTML = '';
+
+        availableVods.forEach(v => {
+          const card = document.createElement('div');
+          card.style.background = 'rgba(0,0,0,0.45)';
+          card.style.border = '1px solid rgba(255,255,255,0.12)';
+          card.style.borderRadius = '8px';
+          card.style.padding = '8px 10px';
+          card.style.cursor = 'pointer';
+          card.style.display = 'flex';
+          card.style.gap = '10px';
+          card.style.alignItems = 'center';
+          card.style.transition = 'border-color 0.2s, background 0.2s';
+          card.onmouseover = () => { card.style.borderColor = 'var(--kick-green)'; card.style.background = 'rgba(83, 252, 24, 0.08)'; };
+          card.onmouseout = () => { card.style.borderColor = 'rgba(255,255,255,0.12)'; card.style.background = 'rgba(0,0,0,0.45)'; };
+
+          const thumb = v.thumbnail ? `<img src="${v.thumbnail}" style="width: 64px; height: 38px; object-fit: cover; border-radius: 4px; flex-shrink: 0;" />` : '';
+          card.innerHTML = `
+            ${thumb}
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${v.title}</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${v.durationFormatted || 'VOD'} &bull; ${v.views || 0} views</div>
+            </div>
+          `;
+          card.onclick = () => {
+            urlInput.value = channelSlug ? `https://kick.com/${channelSlug}/videos/${v.id}` : `https://kick.com/video/${v.id}`;
+            btnClear.style.display = 'flex';
+            detectUrl();
+          };
+          suggestionsGrid.appendChild(card);
+        });
+        suggestionsBox.style.display = 'block';
+      } else {
+        suggestionsBox.style.display = 'none';
+      }
+
+      errorBanner.style.display = 'flex';
+      errorBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function clearError() {
+      errorBanner.style.display = 'none';
+      const suggestionsBox = document.getElementById('error-suggestions');
+      if (suggestionsBox) suggestionsBox.style.display = 'none';
+    }
+
+    // Input handlers
+    urlInput.addEventListener('input', () => {
+      btnClear.style.display = urlInput.value.trim() ? 'flex' : 'none';
+    });
+
+    btnClear.addEventListener('click', () => {
+      urlInput.value = '';
+      btnClear.style.display = 'none';
+      urlInput.focus();
+    });
+
+    btnPaste.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          urlInput.value = text.trim();
+          btnClear.style.display = 'flex';
+          showToast('Pasted URL from clipboard', 'info');
+          detectUrl();
+        }
+      } catch (err) {
+        showToast('Clipboard access denied, please paste manually (Ctrl+V)', 'error');
+      }
+    });
+
+    // Preset buttons
+    document.querySelectorAll('.chip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        urlInput.value = btn.getAttribute('data-preset');
+        btnClear.style.display = 'flex';
+        detectUrl();
+      });
+    });
+
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        detectUrl();
+      }
+    });
+
+    btnDetect.addEventListener('click', detectUrl);
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Core Detection Function
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function detectUrl() {
+      const url = urlInput.value.trim();
+      if (!url) {
+        showError('Empty Input', 'Please enter a Kick channel name, VOD/clip URL, or YouTube video link.');
+        return;
+      }
+
+      clearError();
+      resetProgress();
+      resultCard.style.display = 'none';
+      offlineView.style.display = 'none';
+
+      // Set Loading State
+      btnDetect.disabled = true;
+      btnDetectText.textContent = 'Detecting...';
+      btnDetectIcon.innerHTML = '<span class="spinner"></span>';
+
+      try {
+        const res = await fetch('/api/detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError('Detection Error', data.error || 'Failed to inspect the provided URL.', data.availableVods || [], data.channelSlug || '');
+          return;
+        }
+
+        currentMedia = data;
+        renderMediaResult(data);
+        showToast('Media detected successfully', 'success');
+
+      } catch (err) {
+        showError('Detection Error', err.message);
+      } finally {
+        btnDetect.disabled = false;
+        btnDetectText.textContent = 'Detect Media';
+        btnDetectIcon.innerHTML = '<polyline points="9 18 15 12 9 6"/>';
+      }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Render Results
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    function renderMediaResult(data) {
+      // If channel is offline Kick channel
+      if (data.type === 'offline_channel') {
+        renderOfflineChannel(data);
+        return;
+      }
+
+      resultCard.style.display = 'block';
+      resultTitle.textContent = data.title || 'Untitled Stream';
+      resultChannelName.textContent = data.channel || 'Streamer';
+
+      // Thumbnail
+      if (data.thumbnail) {
+        resultThumbImg.src = data.thumbnail;
+        resultThumbImg.style.display = 'block';
+        btnDownloadThumb.style.display = 'inline-flex';
+      } else {
+        resultThumbImg.style.display = 'none';
+        btnDownloadThumb.style.display = 'none';
+      }
+
+      // Duration badge
+      if (data.isLive) {
+        resultDurationBadge.innerHTML = '<span class="live-dot" style="margin-right:4px;"></span> LIVE';
+        resultDurationBadge.style.background = 'rgba(255, 51, 51, 0.9)';
+      } else {
+        resultDurationBadge.textContent = data.durationFormatted || '00:00';
+        resultDurationBadge.style.background = 'rgba(0, 0, 0, 0.8)';
+      }
+
+      // Badges / Tags
+      metaTagsContainer.innerHTML = '';
+      if (data.platform === 'kick') {
+        const pBadge = document.createElement('span');
+        pBadge.className = 'badge-pill badge-kick';
+        pBadge.textContent = 'Kick.com';
+        metaTagsContainer.appendChild(pBadge);
+
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'badge-pill';
+        typeBadge.style.background = 'rgba(255, 255, 255, 0.08)';
+        typeBadge.style.color = '#fff';
+        typeBadge.textContent = data.isLive ? '🔴 LIVE STREAM' : (data.type === 'clip' ? '🎬 CLIP' : '📼 VOD REPLAY');
+        metaTagsContainer.appendChild(typeBadge);
+
+        if (data.viewers) {
+          const vBadge = document.createElement('span');
+          vBadge.className = 'badge-pill';
+          vBadge.style.background = 'rgba(255, 255, 255, 0.05)';
+          vBadge.style.color = 'var(--text-muted)';
+          vBadge.textContent = `👁️ ${data.viewers.toLocaleString()} Viewers`;
+          metaTagsContainer.appendChild(vBadge);
+        }
+      } else if (data.platform === 'youtube') {
+        const pBadge = document.createElement('span');
+        pBadge.className = 'badge-pill badge-yt';
+        pBadge.textContent = 'YouTube';
+        metaTagsContainer.appendChild(pBadge);
+
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'badge-pill';
+        typeBadge.style.background = 'rgba(255, 255, 255, 0.08)';
+        typeBadge.style.color = '#fff';
+        typeBadge.textContent = data.isLive ? '🔴 LIVE' : '📹 VIDEO';
+        metaTagsContainer.appendChild(typeBadge);
+      }
+
+      // Stream copy button visibility
+      if (data.masterUrl || data.clipUrl) {
+        btnCopyStream.style.display = 'inline-flex';
+        btnCopyStream.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          ${data.type === 'clip' ? 'Copy MP4 Link' : 'Copy M3U8 Stream (VLC)'}
+        `;
+      } else {
+        btnCopyStream.style.display = 'none';
+      }
+
+      // YouTube Tab Switcher (Video vs MP3)
+      if (data.platform === 'youtube' && !data.isLive) {
+        ytTabSwitcher.style.display = 'flex';
+        selectedYtTab = 'video';
+        tabYtVideo.classList.add('active');
+        tabYtAudio.classList.remove('active');
+      } else {
+        ytTabSwitcher.style.display = 'none';
+      }
+
+      // Render Quality Grid
+      renderQualityGrid();
+
+      // Configure Download Button Label
+      updateDownloadButtonState();
+
+      resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // Render Quality Grid based on current platform & tab
+    function renderQualityGrid() {
+      qualityGrid.innerHTML = '';
+      if (!currentMedia) return;
+
+      let options = [];
+
+      if (currentMedia.platform === 'kick') {
+        if (currentMedia.type === 'clip') {
+          options = [{ quality: 'Source (MP4)', label: 'Source (MP4)', isBest: true, clipUrl: currentMedia.clipUrl }];
+        } else if (currentMedia.variants && currentMedia.variants.length > 0) {
+          options = currentMedia.variants;
+        } else {
+          options = [{ quality: 'Source (Best)', label: 'Source (Best)', isBest: true, url: currentMedia.masterUrl }];
+        }
+      } else if (currentMedia.platform === 'youtube') {
+        if (selectedYtTab === 'audio') {
+          options = currentMedia.audioFormats || [];
+        } else {
+          options = currentMedia.videoFormats || [];
+        }
+      }
+
+      if (options.length === 0) {
+        qualityContainer.style.display = 'none';
+        selectedQuality = null;
+        return;
+      }
+
+      qualityContainer.style.display = 'block';
+
+      // Default selection to best
+      const bestIdx = options.findIndex(o => o.isBest);
+      selectedQuality = bestIdx !== -1 ? options[bestIdx] : options[0];
+
+      options.forEach((opt, idx) => {
+        const card = document.createElement('div');
+        card.className = `quality-option ${opt === selectedQuality ? 'selected' : ''}`;
+        
+        const isBestBadge = opt.isBest ? '<span class="best-tag">BEST</span>' : '<span style="font-size: 9px; font-weight: 700; color: var(--kick-green); background: rgba(83, 252, 24, 0.12); padding: 1px 5px; border-radius: 3px;">⚡ TURBO</span>';
+        const titleText = opt.quality || opt.label || opt.bitrate || 'Standard';
+        const subInfo = opt.bandwidthStr || opt.filesizeStr || opt.resolution || (opt.fps ? `${opt.fps} fps` : '');
+
+        card.innerHTML = `
+          <div class="quality-name">
+            <span>${titleText}</span>
+            ${isBestBadge}
+          </div>
+          ${subInfo ? `<div class="quality-info">${subInfo} &bull; ⚡ High Speed</div>` : '<div class="quality-info">⚡ High Speed (c:copy)</div>'}
+        `;
+
+        card.addEventListener('click', () => {
+          document.querySelectorAll('.quality-option').forEach(el => el.classList.remove('selected'));
+          card.classList.add('selected');
+          selectedQuality = opt;
+          updateDownloadButtonState();
+        });
+
+        qualityGrid.appendChild(card);
+      });
+    }
+
+    function updateDownloadButtonState() {
+      if (!currentMedia) return;
+
+      const qName = selectedQuality?.quality || selectedQuality?.label || '';
+      if (currentMedia.isLive) {
+        btnDownloadLabel.textContent = `Start Live Recording (${qName || 'MP4'})`;
+      } else if (currentMedia.platform === 'youtube' && selectedYtTab === 'audio') {
+        btnDownloadLabel.textContent = `⚡ Extract High-Speed MP3 (${qName || '320kbps'})`;
+      } else {
+        btnDownloadLabel.textContent = `⚡ Download ${qName || 'MP4'} (High-Speed c:copy)`;
+      }
+    }
+
+    // YouTube Tab Events
+    tabYtVideo.addEventListener('click', () => {
+      selectedYtTab = 'video';
+      tabYtVideo.classList.add('active');
+      tabYtAudio.classList.remove('active');
+      renderQualityGrid();
+      updateDownloadButtonState();
+    });
+
+    tabYtAudio.addEventListener('click', () => {
+      selectedYtTab = 'audio';
+      tabYtAudio.classList.add('active');
+      tabYtVideo.classList.remove('active');
+      renderQualityGrid();
+      updateDownloadButtonState();
+    });
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Download Action Handler
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    btnStartDownload.addEventListener('click', async () => {
+      if (!currentMedia) return;
+
+      // Instant high-speed direct CDN download for Kick clips (bypasses serverless timeouts)
+      if (currentMedia.platform === 'kick' && currentMedia.type === 'clip' && currentMedia.clipUrl) {
+        const safeTitle = (currentMedia.title || 'kick_clip').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
+        const a = document.createElement('a');
+        a.href = currentMedia.clipUrl;
+        a.download = `${safeTitle}.mp4`;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast('🚀 Downloading Kick Clip directly from CDN...', 'success');
+        return;
+      }
+
+      clearError();
+      resetProgress();
+      progressBox.style.display = 'block';
+      btnStartDownload.disabled = true;
+
+      try {
+        let endpoint = '';
+        let payload = {};
+
+        if (currentMedia.platform === 'kick') {
+          if (currentMedia.type === 'clip') {
+            endpoint = '/api/download/clip';
+            payload = {
+              clipUrl: currentMedia.clipUrl,
+              title: currentMedia.title
+            };
+          } else {
+            // Live or VOD
+            endpoint = '/api/download/hls';
+            payload = {
+              url: (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl,
+              title: currentMedia.title,
+              isLive: currentMedia.isLive,
+              quality: selectedQuality ? selectedQuality.quality : 'best',
+              duration: currentMedia.duration || 0
+            };
+          }
+        } else if (currentMedia.platform === 'youtube') {
+          endpoint = '/api/download/youtube';
+          payload = {
+            url: currentMedia.url,
+            type: selectedYtTab,
+            isLive: currentMedia.isLive,
+            formatSelector: selectedQuality?.formatSelector || '',
+            quality: selectedQuality?.quality || '0',
+            title: currentMedia.title
+          };
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to start download job.');
+        }
+
+        activeJobId = data.jobId;
+
+        if (currentMedia.isLive) {
+          btnStopRecording.style.display = 'inline-flex';
+          showToast('🔴 Live recording started! Click Stop when done.', 'info');
+        } else {
+          showToast('⚡ High-speed stream packaging started...', 'info');
+        }
+
+        // Start polling job status
+        startJobPolling(activeJobId);
+
+      } catch (err) {
+        showError('Download Error', err.message);
+        btnStartDownload.disabled = false;
+        progressBox.style.display = 'none';
+      }
+    });
+
+    // Copy Stream / Direct Media URL
+    btnCopyStream.addEventListener('click', async () => {
+      if (!currentMedia) return;
+      const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.masterUrl || currentMedia.clipUrl || currentMedia.url);
+      if (streamUrl) {
+        try {
+          await navigator.clipboard.writeText(streamUrl);
+          showToast('📋 Stream URL copied to clipboard! (Ready for VLC or HLS player)', 'success');
+        } catch (e) {
+          showToast('Copy failed, please copy manually', 'error');
+        }
+      }
+    });
+
+    // Stop Live Recording
+    btnStopRecording.addEventListener('click', async () => {
+      if (!activeJobId) return;
+
+      btnStopRecording.disabled = true;
+      btnStopRecording.textContent = 'Finalizing MP4...';
+
+      try {
+        const res = await fetch(`/api/stop/${activeJobId}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not stop recording');
+        showToast('Recording stopped. Finalizing video file...', 'success');
+      } catch (err) {
+        showError('Stop Error', err.message);
+      }
+    });
+
+    // Download Thumbnail
+    btnDownloadThumb.addEventListener('click', () => {
+      if (!currentMedia || !currentMedia.thumbnail) return;
+      const thumbUrl = currentMedia.thumbnail;
+      const safeTitle = (currentMedia.title || 'thumbnail').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 50);
+      const downloadProxyUrl = `/api/thumbnail?url=${encodeURIComponent(thumbUrl)}&filename=${encodeURIComponent(safeTitle)}`;
+      
+      const a = document.createElement('a');
+      a.href = downloadProxyUrl;
+      a.download = `${safeTitle}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('Downloading thumbnail...', 'success');
+    });
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Job Polling System
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    function startJobPolling(jobId) {
+      if (pollTimer) clearInterval(pollTimer);
+
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/status/${jobId}`);
+          if (!res.ok) {
+            throw new Error('Could not retrieve job status');
+          }
+          const job = await res.json();
+          updateProgressUI(job);
+
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            onJobCompleted(job);
+          } else if (job.status === 'error') {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            onJobFailed(job);
+          }
+        } catch (err) {
+          console.warn('Poll error:', err.message);
+        }
+      }, 1200);
+    }
+
+    function updateProgressUI(job) {
+      metricStatus.textContent = job.status.toUpperCase();
+      metricSpeed.textContent = job.speed || '--';
+      metricSize.textContent = job.size || '0 B';
+      metricEta.textContent = job.eta || '--:--';
+
+      if (job.isLive) {
+        progressStatusLabel.textContent = `🔴 Live Recording (${job.eta})`;
+        progressPercentageLabel.textContent = 'REC';
+        progressBarFill.style.width = '100%';
+      } else {
+        const pct = typeof job.progress === 'number' ? job.progress : 0;
+        progressStatusLabel.textContent = `Downloading (${pct}%)`;
+        progressPercentageLabel.textContent = `${pct}%`;
+        progressBarFill.style.width = `${pct}%`;
+      }
+    }
+
+    let lastFinishedJob = null;
+    let cachedBlobUrl = null;
+
+    async function triggerBlobDownload(job) {
+      if (!job) return;
+      const btnSaveLabel = document.getElementById('btn-save-file-label');
+      const originalLabel = '💾 Save Video to Phone / Device';
+      
+      try {
+        if (btnSaveLabel) btnSaveLabel.textContent = '⏳ Fetching MP4 for Phone...';
+        showToast('📥 Packaging and preparing video file...', 'info');
+
+        const fileUrl = `/api/file/${job.id}`;
+        const response = await fetch(fileUrl);
+
+        if (!response.ok) {
+          throw new Error(`Server returned status ${response.status}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          // If proxy returned cookie-check HTML, warn and fallback
+          throw new Error('Preview proxy intercepted download. Please click Save again.');
+        }
+
+        const blob = await response.blob();
+        const mimeType = (job.filename && job.filename.endsWith('.mp3')) ? 'audio/mpeg' : 'video/mp4';
+        const fileBlob = new Blob([blob], { type: mimeType });
+
+        if (cachedBlobUrl) {
+          window.URL.revokeObjectURL(cachedBlobUrl);
+        }
+        cachedBlobUrl = window.URL.createObjectURL(fileBlob);
+
+        const safeFilename = job.filename || 'video.mp4';
+        const autoLink = document.createElement('a');
+        autoLink.style.display = 'none';
+        autoLink.href = cachedBlobUrl;
+        autoLink.download = safeFilename;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        setTimeout(() => autoLink.remove(), 1000);
+
+        if (btnSaveLabel) btnSaveLabel.textContent = '✅ Saved! Tap to Download Again';
+        showToast(`🎉 Video downloaded: ${safeFilename}`, 'success');
+      } catch (err) {
+        console.error('Blob download failed, attempting direct link:', err);
+        if (btnSaveLabel) btnSaveLabel.textContent = '💾 Tap to Download MP4';
+        
+        // Fallback: standard anchor click
+        const fallbackLink = document.createElement('a');
+        fallbackLink.href = `/api/file/${job.id}`;
+        fallbackLink.download = job.filename || 'video.mp4';
+        fallbackLink.target = '_blank';
+        document.body.appendChild(fallbackLink);
+        fallbackLink.click();
+        setTimeout(() => fallbackLink.remove(), 1000);
+      }
+    }
+
+    function onJobCompleted(job) {
+      btnStartDownload.disabled = false;
+      btnStopRecording.style.display = 'none';
+      btnStopRecording.disabled = false;
+      btnStopRecording.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Stop & Finalize MP4';
+
+      progressStatusLabel.textContent = '✅ Completed!';
+      progressPercentageLabel.textContent = '100%';
+      progressBarFill.style.width = '100%';
+      metricStatus.textContent = 'READY';
+
+      lastFinishedJob = job;
+      completedActions.style.display = 'block';
+
+      showToast('🎉 Video ready! Saving MP4 to your phone...', 'success');
+
+      // Trigger high-reliability blob download
+      triggerBlobDownload(job);
+    }
+
+    btnSaveFinishedFile.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (lastFinishedJob) {
+        triggerBlobDownload(lastFinishedJob);
+      } else {
+        showToast('No active download found. Please start a download first.', 'error');
+      }
+    });
+
+    function onJobFailed(job) {
+      btnStartDownload.disabled = false;
+      btnStopRecording.style.display = 'none';
+      showError('Job Failed', job.error || 'The download or stream recording failed.');
+      progressBox.style.display = 'none';
+    }
+
+    function resetProgress() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      activeJobId = null;
+      progressBox.style.display = 'none';
+      completedActions.style.display = 'none';
+      progressBarFill.style.width = '0%';
+      btnStopRecording.style.display = 'none';
+      btnStartDownload.disabled = false;
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Offline Channel Browser
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    function renderOfflineChannel(data) {
+      channelOfflineData = data;
+      offlineView.style.display = 'block';
+
+      offlineAvatar.src = data.profilePic || 'https://kick.com/favicon.ico';
+      offlineChannelName.textContent = data.channel || data.slug;
+      offlineBio.textContent = data.bio || (data.followersCount ? `${data.followersCount.toLocaleString()} Followers` : 'Kick Streamer');
+
+      vodCount.textContent = (data.vods || []).length;
+      clipCount.textContent = (data.clips || []).length;
+
+      currentOfflineTab = 'vods';
+      tabOfflineVods.classList.add('active');
+      tabOfflineClips.classList.remove('active');
+
+      renderOfflineGridItems();
+      offlineView.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    tabOfflineVods.addEventListener('click', () => {
+      currentOfflineTab = 'vods';
+      tabOfflineVods.classList.add('active');
+      tabOfflineClips.classList.remove('active');
+      renderOfflineGridItems();
+    });
+
+    tabOfflineClips.addEventListener('click', () => {
+      currentOfflineTab = 'clips';
+      tabOfflineClips.classList.add('active');
+      tabOfflineVods.classList.remove('active');
+      renderOfflineGridItems();
+    });
+
+    function renderOfflineGridItems() {
+      offlineGrid.innerHTML = '';
+      if (!channelOfflineData) return;
+
+      const items = currentOfflineTab === 'vods' ? (channelOfflineData.vods || []) : (channelOfflineData.clips || []);
+
+      if (items.length === 0) {
+        offlineGrid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 30px; color: var(--text-dim);">
+            No ${currentOfflineTab === 'vods' ? 'VOD replays' : 'clips'} found for this channel.
+          </div>
+        `;
+        return;
+      }
+
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'vod-item-card';
+
+        const thumb = item.thumbnail || 'https://kick.com/favicon.ico';
+        const title = item.title || 'Untitled';
+        const dur = item.durationFormatted || '00:00';
+        const views = item.views ? `${item.views.toLocaleString()} views` : '';
+
+        card.innerHTML = `
+          <div class="vod-item-thumb-box">
+            <img src="${thumb}" alt="${title}" class="vod-item-thumb" loading="lazy" />
+            <span class="thumb-badge">${dur}</span>
+          </div>
+          <div class="vod-item-content">
+            <div class="vod-item-title">${title}</div>
+            <div class="vod-item-meta">
+              <span>${views}</span>
+              <span style="color: var(--kick-green); font-weight: 700;">Download ➔</span>
+            </div>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          if (currentOfflineTab === 'vods') {
+            urlInput.value = channelOfflineData?.slug ? `https://kick.com/${channelOfflineData.slug}/videos/${item.id}` : `https://kick.com/video/${item.id}`;
+          } else {
+            urlInput.value = channelOfflineData?.slug ? `https://kick.com/${channelOfflineData.slug}/clips/${item.slug || item.id}` : `https://kick.com/clips/${item.slug || item.id}`;
+          }
+          btnClear.style.display = 'flex';
+          detectUrl();
+        });
+
+        offlineGrid.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>

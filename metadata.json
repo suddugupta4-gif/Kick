@@ -1,0 +1,6 @@
+{
+  "name": "StreamDrop",
+  "description": "Kick.com and YouTube downloader & live stream recorder with HLS copy, audio extraction, clip downloading, and offline channel browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
