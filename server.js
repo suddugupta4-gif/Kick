@@ -820,7 +820,7 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
     let lastBytes = 0;
     let lastTime = Date.now();
 
-    const concurrency = 8;
+    const concurrency = 16;
     let nextIndex = 0;
     const downloadedBuffers = new Map();
     let nextToWrite = 0;
@@ -845,7 +845,7 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
         const idx = nextIndex++;
         const segUrl = segments[idx];
 
-        let retries = 3;
+        let retries = 4;
         let segBuffer = null;
 
         while (retries > 0 && !isAborted) {
@@ -857,16 +857,16 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
                 'Referer': 'https://kick.com/',
                 'Origin': 'https://kick.com'
               },
-              timeout: 25000
+              timeout: 20000
             });
             segBuffer = Buffer.from(segRes.data);
             break;
           } catch (e) {
             retries--;
             if (retries === 0) {
-              console.warn(`[Job ${job.id}] Segment ${idx} skipped after 3 retries:`, e.message);
+              console.warn(`[Job ${job.id}] Segment ${idx} failed:`, e.message);
             } else {
-              await new Promise(r => setTimeout(r, 400));
+              await new Promise(r => setTimeout(r, 250));
             }
           }
         }
@@ -882,16 +882,19 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
 
           const now = Date.now();
           const elapsed = (now - lastTime) / 1000;
-          if (elapsed >= 0.7) {
+          
+          const pct = Math.min(99, Math.round((completedCount / totalSegments) * 100));
+          job.progress = Math.max(1, pct);
+
+          if (elapsed >= 0.5) {
             const speedBps = (totalBytesDownloaded - lastBytes) / elapsed;
             job.speed = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
 
-            const pct = Math.min(99, Math.round((completedCount / totalSegments) * 100));
-            job.progress = pct;
-
             const remainingSegs = totalSegments - completedCount;
-            const avgTimePerSeg = elapsed / Math.max(1, (completedCount - (lastBytes ? 1 : 0)));
-            const remainingSec = Math.round(remainingSegs * avgTimePerSeg);
+            const avgSpeedBytes = totalBytesDownloaded / Math.max(1, (now - job.startTime) / 1000);
+            const avgBytesPerSeg = totalBytesDownloaded / Math.max(1, completedCount);
+            const estRemainingBytes = remainingSegs * avgBytesPerSeg;
+            const remainingSec = Math.round(estRemainingBytes / Math.max(1, avgSpeedBytes));
             job.eta = formatDuration(remainingSec);
 
             lastBytes = totalBytesDownloaded;
