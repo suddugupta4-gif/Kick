@@ -1378,6 +1378,11 @@
           <span id="btn-download-label">Download MP4</span>
         </button>
 
+        <a class="btn-secondary-action" id="btn-direct-stream-link" style="display: none; text-decoration: none;" target="_blank" download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Direct Stream (IDM / Phone)
+        </a>
+
         <button type="button" class="btn-secondary-action" id="btn-copy-stream" style="display: none;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           Copy Stream URL (VLC)
@@ -1930,12 +1935,39 @@
       if (!currentMedia) return;
 
       const qName = selectedQuality?.quality || selectedQuality?.label || '';
-      if (currentMedia.isLive) {
-        btnDownloadLabel.textContent = `Start Live Recording (${qName || 'MP4'})`;
+      const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
+      const btnDirectStreamLink = document.getElementById('btn-direct-stream-link');
+
+      if (btnDirectStreamLink) {
+        if (streamUrl && !currentMedia.isLive && currentMedia.type !== 'clip') {
+          btnDirectStreamLink.style.display = 'inline-flex';
+          btnDirectStreamLink.href = `/api/stream-hls?url=${encodeURIComponent(streamUrl)}&filename=${encodeURIComponent(currentMedia.title || 'video')}`;
+        } else {
+          btnDirectStreamLink.style.display = 'none';
+        }
+      }
+
+      if (isLiveRecordingActive) {
+        btnDownloadLabel.textContent = '🛑 Stop & Save Live Recording';
+        btnStartDownload.style.background = '#ff3333';
+        btnStartDownload.style.color = '#fff';
+        btnStartDownload.style.boxShadow = '0 0 16px rgba(255, 51, 51, 0.4)';
+        btnStartDownload.disabled = false;
+      } else if (currentMedia.isLive) {
+        btnDownloadLabel.textContent = `🔴 Start Live Recording (${qName || 'MP4'})`;
+        btnStartDownload.style.background = '';
+        btnStartDownload.style.color = '';
+        btnStartDownload.style.boxShadow = '';
       } else if (currentMedia.platform === 'youtube' && selectedYtTab === 'audio') {
         btnDownloadLabel.textContent = `⚡ Extract High-Speed MP3 (${qName || '320kbps'})`;
+        btnStartDownload.style.background = '';
+        btnStartDownload.style.color = '';
+        btnStartDownload.style.boxShadow = '';
       } else {
         btnDownloadLabel.textContent = `⚡ Download ${qName || 'MP4'} (High-Speed c:copy)`;
+        btnStartDownload.style.background = '';
+        btnStartDownload.style.color = '';
+        btnStartDownload.style.boxShadow = '';
       }
     }
 
@@ -2580,9 +2612,9 @@
     btnStartDownload.addEventListener('click', async () => {
       if (!currentMedia) return;
 
-      // If active client live recording, clicking button stops & saves
-      if (isLiveRecordingActive && stopLiveRecordingFn) {
-        stopLiveRecordingFn();
+      // If active live recording is in progress, clicking the button triggers stop & save
+      if (isLiveRecordingActive && activeJobId) {
+        btnStopRecording.click();
         return;
       }
 
@@ -2590,25 +2622,30 @@
       resetProgress();
 
       try {
-        if (currentMedia.platform === 'kick') {
-          const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
-          const qualityName = selectedQuality ? selectedQuality.quality : (currentMedia.type === 'clip' ? 'Clip' : 'Source');
-          
-          if (currentMedia.isLive) {
-            // Start continuous live stream recorder
-            startClientLiveRecording(streamUrl, currentMedia.title, qualityName);
-            return;
-          }
-
-          // Use in-browser Turbo HLS Downloader for VODs & Clips
-          startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
-          return;
-        }
-
         let endpoint = '';
         let payload = {};
 
-        if (currentMedia.platform === 'youtube') {
+        if (currentMedia.platform === 'kick') {
+          const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
+          const qualityName = selectedQuality ? selectedQuality.quality : (currentMedia.type === 'clip' ? 'Clip' : 'Source');
+
+          if (currentMedia.type === 'clip' && currentMedia.clipUrl && !currentMedia.clipUrl.includes('.m3u8')) {
+            endpoint = '/api/download/clip';
+            payload = {
+              clipUrl: currentMedia.clipUrl,
+              title: currentMedia.title
+            };
+          } else {
+            endpoint = '/api/download/hls';
+            payload = {
+              url: streamUrl,
+              title: currentMedia.title,
+              isLive: Boolean(currentMedia.isLive),
+              quality: qualityName,
+              duration: currentMedia.duration || 0
+            };
+          }
+        } else if (currentMedia.platform === 'youtube') {
           endpoint = '/api/download/youtube';
           payload = {
             url: currentMedia.url,
@@ -2621,7 +2658,6 @@
         }
 
         progressBox.style.display = 'block';
-        btnStartDownload.disabled = true;
 
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -2637,10 +2673,13 @@
         activeJobId = data.jobId;
 
         if (currentMedia.isLive) {
+          isLiveRecordingActive = true;
           btnStopRecording.style.display = 'inline-flex';
-          showToast('🔴 Live recording started! Click Stop when done.', 'info');
+          updateDownloadButtonState();
+          showToast('🔴 Live recording started! Tap Stop when done.', 'info');
         } else {
-          showToast('⚡ High-speed stream packaging started...', 'info');
+          btnStartDownload.disabled = true;
+          showToast('⚡ High-speed stream download started...', 'info');
         }
 
         startJobPolling(activeJobId);
@@ -2676,15 +2715,19 @@
       if (!activeJobId) return;
 
       btnStopRecording.disabled = true;
-      btnStopRecording.textContent = 'Finalizing MP4...';
+      btnStopRecording.innerHTML = '<span class="spinner spinner-light"></span> Finalizing MP4...';
+      btnDownloadLabel.textContent = '⏳ Finalizing MP4...';
+      btnStartDownload.disabled = true;
 
       try {
         const res = await fetch(`/api/stop/${activeJobId}`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not stop recording');
-        showToast('Recording stopped. Finalizing video file...', 'success');
+        showToast('Saving and packaging live video file...', 'success');
       } catch (err) {
         showError('Stop Error', err.message);
+        btnStopRecording.disabled = false;
+        btnStartDownload.disabled = false;
       }
     });
 
@@ -2827,10 +2870,12 @@
     }
 
     function onJobCompleted(job) {
+      isLiveRecordingActive = false;
       btnStartDownload.disabled = false;
       btnStopRecording.style.display = 'none';
       btnStopRecording.disabled = false;
       btnStopRecording.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Stop & Finalize MP4';
+      updateDownloadButtonState();
 
       progressStatusLabel.textContent = '✅ Completed!';
       progressPercentageLabel.textContent = '100%';
@@ -2840,7 +2885,7 @@
       lastFinishedJob = job;
       completedActions.style.display = 'block';
 
-      showToast('🎉 Video ready! Saving MP4 to your phone...', 'success');
+      showToast('🎉 Video ready! Saving MP4 to your device...', 'success');
 
       // Trigger high-reliability blob download
       triggerBlobDownload(job);
@@ -2856,8 +2901,10 @@
     });
 
     function onJobFailed(job) {
+      isLiveRecordingActive = false;
       btnStartDownload.disabled = false;
       btnStopRecording.style.display = 'none';
+      updateDownloadButtonState();
       showError('Job Failed', job.error || 'The download or stream recording failed.');
       progressBox.style.display = 'none';
     }

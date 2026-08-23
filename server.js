@@ -127,6 +127,34 @@ async function fetchKickText(url, referer = 'https://kick.com/') {
   }
 }
 
+async function fetchKickBuffer(url, referer = 'https://kick.com/') {
+  try {
+    const segRes = await axios.get(url, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': BROWSER_HEADERS['User-Agent'],
+        'Referer': referer,
+        'Origin': 'https://kick.com'
+      },
+      timeout: 20000
+    });
+    return Buffer.from(segRes.data);
+  } catch (err) {
+    try {
+      const gRes = await gotScraping.get(url, {
+        headers: {
+          'Referer': referer
+        },
+        timeout: { request: 20000 },
+        responseType: 'buffer'
+      });
+      return gRes.rawBody || Buffer.from(gRes.body);
+    } catch (gErr) {
+      throw err;
+    }
+  }
+}
+
 // Resilient Kick VOD Resolver
 async function resolveKickVod(videoIdOrSlug, channelSlug = '') {
   let sourceUrl = '';
@@ -283,11 +311,20 @@ async function parseMasterPlaylist(masterUrl) {
   }
 }
 
+function getYtDlpBin() {
+  const localBin = path.join(__dirname, 'bin', 'yt-dlp');
+  if (fs.existsSync(localBin)) return localBin;
+  const tmpBin = '/tmp/yt-dlp';
+  if (fs.existsSync(tmpBin)) return tmpBin;
+  return 'yt-dlp';
+}
+
 // Execute yt-dlp --dump-json with serverless fallback
 function getYoutubeInfo(url) {
   return new Promise((resolve, reject) => {
+    const ytBin = getYtDlpBin();
     const args = ['--dump-json', '--no-playlist', '--no-warnings', url];
-    execFile('yt-dlp', args, { maxBuffer: 10 * 1024 * 1024 }, async (err, stdout, stderr) => {
+    execFile(ytBin, args, { maxBuffer: 10 * 1024 * 1024 }, async (err, stdout, stderr) => {
       if (!err && stdout) {
         try {
           const info = JSON.parse(stdout);
@@ -833,6 +870,7 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
       isAborted = true;
       try { writer.end(); } catch (e) {}
     };
+    job.stop = job.abort;
 
     const flushBuffers = () => {
       while (downloadedBuffers.has(nextToWrite)) {
@@ -853,23 +891,14 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
 
         while (retries > 0 && !isAborted) {
           try {
-            const segRes = await axios.get(segUrl, {
-              responseType: 'arraybuffer',
-              headers: {
-                'User-Agent': BROWSER_HEADERS['User-Agent'],
-                'Referer': 'https://kick.com/',
-                'Origin': 'https://kick.com'
-              },
-              timeout: 20000
-            });
-            segBuffer = Buffer.from(segRes.data);
+            segBuffer = await fetchKickBuffer(segUrl);
             break;
           } catch (e) {
             retries--;
             if (retries === 0) {
-              console.warn(`[Job ${job.id}] Segment ${idx} failed:`, e.message);
+              console.warn(`[Job ${job.id}] Segment ${idx} skipped after retries:`, e.message);
             } else {
-              await new Promise(r => setTimeout(r, 250));
+              await new Promise(r => setTimeout(r, 200));
             }
           }
         }
@@ -949,6 +978,186 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
   }
 }
 
+// Execute Kick Stream Download / Recording using FFmpeg with pure Node.js fallback
+function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      let playlistUrl = streamUrl;
+      
+      // If master playlist, resolve to best variant if needed
+      try {
+        const text = await fetchKickText(playlistUrl);
+        if (text && typeof text === 'string' && text.includes('#EXT-X-STREAM-INF:')) {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+          let bestVariant = null;
+          let maxBw = 0;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+              const next = lines[i + 1];
+              if (next && !next.startsWith('#')) {
+                const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+                const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+                const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+                if (bw > maxBw || !bestVariant) {
+                  maxBw = bw;
+                  bestVariant = fullUrl;
+                }
+              }
+            }
+          }
+          if (bestVariant) {
+            playlistUrl = bestVariant;
+          }
+        }
+      } catch (e) {}
+
+      console.log(`[Job ${job.id}] Starting Kick ${isLive ? 'Live Recording' : 'VOD Download'} for: ${playlistUrl}`);
+
+      const headersStr = `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`;
+
+      let ffmpegArgs = [];
+      if (isLive) {
+        ffmpegArgs = [
+          '-y',
+          '-headers', headersStr,
+          '-i', playlistUrl,
+          '-c', 'copy',
+          '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+          filepath
+        ];
+      } else {
+        ffmpegArgs = [
+          '-y',
+          '-headers', headersStr,
+          '-i', playlistUrl,
+          '-c', 'copy',
+          '-bsf:a', 'aac_adtstoasc',
+          '-movflags', '+faststart',
+          filepath
+        ];
+      }
+
+      const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
+      job.process = ffmpegProc;
+
+      let lastBytes = 0;
+      let lastTime = Date.now();
+      let lastSpeedSec = 1;
+
+      const statTimer = setInterval(() => {
+        if (fs.existsSync(filepath)) {
+          try {
+            const stats = fs.statSync(filepath);
+            job.rawBytes = stats.size;
+            job.size = formatBytes(stats.size);
+
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            if (elapsed >= 0.5) {
+              const speedBps = (stats.size - lastBytes) / elapsed;
+              if (speedBps > 0) {
+                job.speed = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
+              }
+              lastBytes = stats.size;
+              lastTime = now;
+            }
+
+            if (isLive) {
+              const liveSec = Math.floor((now - job.startTime) / 1000);
+              job.eta = formatDuration(liveSec);
+            }
+          } catch (e) {}
+        }
+        if (job.status === 'completed' || job.status === 'error') {
+          clearInterval(statTimer);
+        }
+      }, 500);
+
+      ffmpegProc.stderr.on('data', (data) => {
+        const text = data.toString();
+        
+        // Parse time=HH:MM:SS.ms
+        const timeMatch = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d+)/);
+        const speedMatch = text.match(/speed=\s*([\d\.]+)x/);
+        const bitrateMatch = text.match(/bitrate=\s*([\d\.]+kbits\/s)/);
+
+        if (speedMatch) {
+          lastSpeedSec = parseFloat(speedMatch[1]) || 1;
+        }
+
+        if (timeMatch) {
+          const currentSec = parseTimeToSeconds(timeMatch[1]);
+          if (isLive) {
+            job.eta = formatDuration(Math.floor((Date.now() - job.startTime) / 1000));
+            if (bitrateMatch) {
+              job.speed = bitrateMatch[1];
+            }
+          } else if (totalDuration > 0) {
+            const pct = Math.min(99, Math.max(1, Math.round((currentSec / totalDuration) * 100)));
+            job.progress = pct;
+            const remainingSec = Math.max(0, Math.round((totalDuration - currentSec) / Math.max(1, lastSpeedSec)));
+            job.eta = formatDuration(remainingSec);
+            if (speedMatch) {
+              job.speed = `${speedMatch[1]}x (${job.speed || 'Turbo'})`;
+            }
+          }
+        }
+      });
+
+      ffmpegProc.on('close', (code) => {
+        clearInterval(statTimer);
+        job.process = null;
+
+        if (fs.existsSync(filepath)) {
+          const stats = fs.statSync(filepath);
+          job.rawBytes = stats.size;
+          job.size = formatBytes(stats.size);
+
+          if (stats.size > 1024 * 10) {
+            job.status = 'completed';
+            job.progress = 100;
+            job.speed = 'Done';
+            job.eta = isLive ? formatDuration(Math.floor((Date.now() - job.startTime) / 1000)) : 'Done';
+            console.log(`[Job ${job.id}] Kick download completed successfully: ${job.size}`);
+            return resolve();
+          }
+        }
+
+        if (code === 0) {
+          job.status = 'completed';
+          job.progress = 100;
+          job.eta = 'Done';
+          return resolve();
+        } else if (job.status !== 'completed') {
+          console.warn(`[Job ${job.id}] FFmpeg exited with code ${code}, attempting native fallback...`);
+          if (isLive) {
+            runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
+          } else {
+            runNativeHlsDownload(playlistUrl, filepath, job).then(resolve).catch(reject);
+          }
+        }
+      });
+
+      ffmpegProc.on('error', (err) => {
+        clearInterval(statTimer);
+        console.warn(`[Job ${job.id}] FFmpeg spawn error (${err.message}), falling back to native engine`);
+        if (isLive) {
+          runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
+        } else {
+          runNativeHlsDownload(playlistUrl, filepath, job).then(resolve).catch(reject);
+        }
+      });
+
+    } catch (err) {
+      console.error(`[Job ${job.id}] Kick download error:`, err);
+      job.status = 'error';
+      job.error = err.message || 'Kick stream download failed.';
+      reject(err);
+    }
+  });
+}
+
 // 3. POST /api/download/hls - Start Kick HLS download / live recording job
 app.post('/api/download/hls', async (req, res) => {
   const { url, title, isLive, quality, duration } = req.body;
@@ -969,7 +1178,7 @@ app.post('/api/download/hls', async (req, res) => {
     speed: '0.0 MB/s',
     size: '0 B',
     rawBytes: 0,
-    eta: isLive ? 'LIVE' : '--:--',
+    eta: isLive ? '00:00' : '--:--',
     title: title || 'Kick Stream',
     filename,
     filepath,
@@ -983,8 +1192,8 @@ app.post('/api/download/hls', async (req, res) => {
 
   jobs.set(jobId, job);
 
-  // Execute using pure Node.js native HLS engine
-  runNativeHlsDownload(url, filepath, job).catch(err => {
+  // Route to high-speed FFmpeg stream engine with auto-fallback
+  runKickStreamDownload(url, filepath, job, Boolean(isLive), Number(duration) || 0).catch(err => {
     job.status = 'error';
     job.error = err.message;
   });
@@ -1158,7 +1367,8 @@ app.post('/api/download/youtube', async (req, res) => {
   }
 
   try {
-    const ytdlpProc = spawn('yt-dlp', ytdlpArgs);
+    const ytBin = getYtDlpBin();
+    const ytdlpProc = spawn(ytBin, ytdlpArgs);
     job.process = ytdlpProc;
 
     // Track file size
@@ -1267,6 +1477,12 @@ app.post('/api/stop/:jobId', (req, res) => {
     return res.status(404).json({ error: 'Job not found' });
   }
 
+  if (typeof job.stop === 'function') {
+    job.stop();
+  } else if (typeof job.abort === 'function') {
+    job.abort();
+  }
+
   if (job.process) {
     try {
       // Send 'q' to stdin for clean ffmpeg exit, or SIGINT
@@ -1275,20 +1491,29 @@ app.post('/api/stop/:jobId', (req, res) => {
       }
       setTimeout(() => {
         if (job.process) {
-          job.process.kill('SIGINT');
+          try { job.process.kill('SIGINT'); } catch (e) {}
         }
-      }, 500);
-
-      job.status = 'completed';
-      job.progress = 100;
-      job.eta = 'Saved';
-      return res.json({ ok: true, message: 'Recording stopped and finalized successfully' });
+      }, 400);
     } catch (err) {
-      return res.status(500).json({ error: `Could not stop process: ${err.message}` });
+      console.warn(`[Job ${jobId}] Process stop warning:`, err.message);
     }
   }
 
-  return res.json({ ok: true, message: 'Job was not actively recording' });
+  setTimeout(() => {
+    if (fs.existsSync(job.filepath)) {
+      try {
+        const stats = fs.statSync(job.filepath);
+        job.rawBytes = stats.size;
+        job.size = formatBytes(stats.size);
+      } catch (e) {}
+    }
+    job.status = 'completed';
+    job.progress = 100;
+    job.eta = 'Saved';
+    job.speed = 'Done';
+  }, 500);
+
+  return res.json({ ok: true, message: 'Recording stopped and finalized successfully' });
 });
 
 // 7. GET /api/status/:jobId - Poll job status
