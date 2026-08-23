@@ -2621,15 +2621,6 @@
       clearError();
       resetProgress();
 
-      // For Kick VODs and Clips: Run high-speed browser-direct downloader so it saves straight into Chrome/Phone Downloads
-      if (currentMedia.platform === 'kick' && !currentMedia.isLive) {
-        const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
-        const qualityName = selectedQuality ? selectedQuality.quality : (currentMedia.type === 'clip' ? 'Clip' : 'Source');
-        if (streamUrl) {
-          return startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
-        }
-      }
-
       try {
         let endpoint = '';
         let payload = {};
@@ -2903,12 +2894,17 @@
 
     const btnCancelDownload = document.getElementById('btn-cancel-download');
     if (btnCancelDownload) {
-      btnCancelDownload.addEventListener('click', () => {
+      btnCancelDownload.addEventListener('click', async () => {
+        if (activeJobId) {
+          try {
+            fetch(`/api/stop/${activeJobId}`, { method: 'POST' });
+          } catch (e) {}
+        }
         if (clientDownloadAbortController) {
           clientDownloadAbortController.abort();
           clientDownloadAbortController = null;
         }
-        showToast('Download cancelled by user', 'info');
+        showToast('Download cancelled', 'info');
         resetProgress();
       });
     }
