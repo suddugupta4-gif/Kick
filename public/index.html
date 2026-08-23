@@ -2003,7 +2003,7 @@
       btnStartDownload.style.background = 'linear-gradient(135deg, #ff4757 0%, #ff6b81 100%)';
       btnStartDownload.style.boxShadow = '0 0 20px rgba(255, 71, 87, 0.45)';
       btnStartDownload.style.color = '#fff';
-      btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${resolution || '1080p'})`;
+      btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (00:00 • 0 B)`;
 
       btnStopRecording.style.display = 'inline-flex';
       btnStopRecording.disabled = false;
@@ -2011,10 +2011,13 @@
 
       metricStatus.textContent = 'RECORDING';
       metricStatus.style.color = '#ff4757';
+      metricEta.textContent = '00:00';
+      metricSize.textContent = '0 B';
+      metricSpeed.textContent = 'Connecting...';
       progressStatusLabel.textContent = '🔴 Connecting to Live Stream...';
       progressBarFill.style.width = '100%';
       progressBarFill.style.background = 'linear-gradient(90deg, #ff4757, #ff6b81)';
-      progressPercentageLabel.textContent = 'LIVE';
+      progressPercentageLabel.textContent = 'REC';
 
       const cleanTitle = (mediaTitle || 'kick_live').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
       const resTag = resolution ? `_${resolution.replace(/[^\w]/g, '')}` : '';
@@ -2030,12 +2033,46 @@
       let lastBytes = 0;
       let lastSpeedTime = Date.now();
       let isStopping = false;
+      let isFirstPoll = true;
+
+      // Real-time Heartbeat UI Timer (guarantees ticking duration, speed, size every 500ms)
+      const timerInterval = setInterval(() => {
+        if (signal.aborted || isStopping) {
+          clearInterval(timerInterval);
+          return;
+        }
+        const now = Date.now();
+        const elapsedSec = Math.floor((now - startTime) / 1000);
+        const durStr = formatDurationClient(elapsedSec);
+
+        metricEta.textContent = durStr;
+        metricSize.textContent = formatBytesClient(totalBytes);
+
+        const speedElapsed = (now - lastSpeedTime) / 1000;
+        if (speedElapsed >= 0.8) {
+          const speedBps = (totalBytes - lastBytes) / (speedElapsed || 1);
+          if (speedBps > 0) {
+            metricSpeed.textContent = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
+          } else if (totalBytes > 0) {
+            metricSpeed.textContent = 'Live (Syncing)';
+          } else {
+            metricSpeed.textContent = 'Connecting...';
+          }
+          lastBytes = totalBytes;
+          lastSpeedTime = now;
+        }
+
+        progressStatusLabel.textContent = `🔴 Live Recording (${durStr} • ${formatBytesClient(totalBytes)}${totalSegmentsCaptured > 0 ? ` • ${totalSegmentsCaptured} segs` : ''})`;
+        if (!isStopping) {
+          btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
+        }
+      }, 500);
 
       let targetPlaylistUrl = streamUrl;
 
       // Resolve master to variant if needed
       try {
-        const initRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`);
+        const initRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`, { signal });
         if (initRes.ok) {
           const initData = await initRes.json();
           if (initData.playlistUrl) {
@@ -2054,10 +2091,10 @@
           headers['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
         }
 
-        // Try direct CDN fetch first (fastest, full bandwidth)
+        // Try direct CDN fetch first with 10s timeout
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
           const resp = await fetch(url, { headers, signal: controller.signal });
           clearTimeout(timeoutId);
           if (resp.ok) {
@@ -2093,23 +2130,31 @@
           const data = await res.json();
           const segments = data.segments || [];
 
-          const newSegments = segments.filter(s => !seenSegmentUrls.has(getSegmentKey(s)));
-          for (const s of newSegments) seenSegmentUrls.add(getSegmentKey(s));
+          let newSegments = [];
+          if (isFirstPoll) {
+            isFirstPoll = false;
+            // On first poll, mark older segments as seen and take only the last 2 newest to start capturing immediately
+            const startIndex = Math.max(0, segments.length - 2);
+            for (let i = 0; i < startIndex; i++) {
+              seenSegmentUrls.add(getSegmentKey(segments[i]));
+            }
+            newSegments = segments.slice(startIndex);
+            for (const s of newSegments) seenSegmentUrls.add(getSegmentKey(s));
+          } else {
+            newSegments = segments.filter(s => !seenSegmentUrls.has(getSegmentKey(s)));
+            for (const s of newSegments) seenSegmentUrls.add(getSegmentKey(s));
+          }
 
           if (newSegments.length > 0) {
-            const downloaded = await Promise.all(newSegments.map(item => downloadSegment(item)));
-            for (const buf of downloaded) {
+            for (const item of newSegments) {
+              if (signal.aborted || isStopping) break;
+              const buf = await downloadSegment(item);
               if (buf && buf.byteLength > 0) {
                 recordedChunks.push(buf);
                 totalBytes += buf.byteLength;
                 totalSegmentsCaptured++;
               }
             }
-
-            metricSize.textContent = formatBytesClient(totalBytes);
-            const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
-            const durStr = formatDurationClient(elapsedSec);
-            progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments • ${durStr} • ${formatBytesClient(totalBytes)})`;
           }
         } catch (e) {}
       };
@@ -2117,7 +2162,8 @@
       const finalizeRecording = async (reason) => {
         if (isStopping) return;
         isStopping = true;
-        clearInterval(liveInterval);
+        clearInterval(timerInterval);
+        clearInterval(pollInterval);
         isLiveRecordingActive = false;
         stopLiveRecordingFn = null;
 
@@ -2134,7 +2180,7 @@
         updateDownloadButtonState();
 
         if (recordedChunks.length === 0) {
-          showError('Live Recording', 'No video data captured from the live stream.');
+          showError('Live Recording', 'No video data captured from the live stream. Please check connection and try again.');
           resetProgress();
           btnStartDownload.disabled = false;
           return;
@@ -2167,6 +2213,7 @@
         metricStatus.textContent = 'SAVED';
         metricEta.textContent = finalDur;
         metricSize.textContent = formatBytesClient(totalBytes);
+        metricSpeed.textContent = 'Done';
         completedActions.style.display = 'block';
         btnStartDownload.disabled = false;
 
@@ -2176,36 +2223,15 @@
       stopLiveRecordingFn = () => finalizeRecording('Stopped by user');
 
       // Initial capture
-      await fetchLivePlaylist();
+      fetchLivePlaylist();
 
       // Poll every 1.5 seconds for new live broadcast chunks
-      const liveInterval = setInterval(async () => {
+      const pollInterval = setInterval(() => {
         if (signal.aborted || isStopping) {
-          clearInterval(liveInterval);
+          clearInterval(pollInterval);
           return;
         }
-
-        await fetchLivePlaylist();
-
-        const now = Date.now();
-        const elapsedSec = Math.floor((now - startTime) / 1000);
-        const durStr = formatDurationClient(elapsedSec);
-
-        metricEta.textContent = durStr;
-        metricSize.textContent = formatBytesClient(totalBytes);
-        progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments • ${durStr} • ${formatBytesClient(totalBytes)})`;
-
-        const speedElapsed = (now - lastSpeedTime) / 1000;
-        if (speedElapsed >= 1) {
-          const speedBps = (totalBytes - lastBytes) / speedElapsed;
-          metricSpeed.textContent = speedBps > 0 ? `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s` : 'Recording...';
-          lastBytes = totalBytes;
-          lastSpeedTime = now;
-        }
-
-        if (!isStopping) {
-          btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
-        }
+        fetchLivePlaylist();
       }, 1500);
     }
 
@@ -2219,6 +2245,9 @@
       resetProgress();
       progressBox.style.display = 'block';
       metricStatus.textContent = 'CONNECTING';
+      metricSpeed.textContent = 'Connecting...';
+      metricSize.textContent = '0 B';
+      metricEta.textContent = '--:--';
       progressStatusLabel.textContent = 'Fetching stream playlist...';
       progressBarFill.style.width = '2%';
       progressPercentageLabel.textContent = '0%';
@@ -2253,7 +2282,7 @@
         let directCdnWorks = null;
 
         const chunks = [];
-        const concurrency = 10; // 10 parallel workers
+        const concurrency = 6; // 6 parallel workers for optimal mobile & desktop throughput
         let nextIndex = 0;
         const downloadedMap = new Map();
         let nextToWrite = 0;
@@ -2281,7 +2310,7 @@
           if (directCdnWorks !== false) {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 4000);
+              const timeoutId = setTimeout(() => controller.abort(), 10000);
               const resp = await fetch(url, { headers, signal: controller.signal });
               clearTimeout(timeoutId);
               if (resp.ok) {
@@ -2335,7 +2364,7 @@
             const elapsedSec = (now - lastTime) / 1000;
             if (elapsedSec >= 0.3 || completedSegments === totalSegments) {
               const speedBps = (totalBytes - lastBytes) / (elapsedSec || 1);
-              const speedMb = (speedBps / (1024 * 1024)).toFixed(1);
+              const speedMb = (speedBps / (1024 * 1024)).toFixed(2);
               metricSpeed.textContent = `${speedMb} MB/s`;
               metricSize.textContent = formatBytesClient(totalBytes);
 
