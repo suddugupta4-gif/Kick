@@ -1962,9 +1962,11 @@
     let clientDownloadAbortController = null;
     let isLiveRecordingActive = false;
     let stopLiveRecordingFn = null;
+    let liveMetricTicker = null;
+    let downloadMetricTicker = null;
 
     function formatBytesClient(bytes) {
-      if (!bytes || bytes === 0) return '0 B';
+      if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
       const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -1995,7 +1997,6 @@
 
       clearError();
       resetProgress();
-      isLiveRecordingActive = true;
       progressBox.style.display = 'block';
 
       // Update button to active recording state
@@ -2005,9 +2006,7 @@
       btnStartDownload.style.color = '#fff';
       btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (00:00 • 0 B)`;
 
-      btnStopRecording.style.display = 'inline-flex';
-      btnStopRecording.disabled = false;
-      btnStopRecording.textContent = '🛑 Stop & Finalize MP4';
+      btnStopRecording.style.display = 'none';
 
       metricStatus.textContent = 'RECORDING';
       metricStatus.style.color = '#ff4757';
@@ -2034,22 +2033,23 @@
       let lastSpeedTime = Date.now();
       let isStopping = false;
       let isFirstPoll = true;
+      let directCdnWorks = null;
 
-      // Real-time Heartbeat UI Timer (guarantees ticking duration, speed, size every 500ms)
-      const timerInterval = setInterval(() => {
+      // Real-time Heartbeat UI Timer (guarantees ticking duration, speed, size every 250ms)
+      liveMetricTicker = setInterval(() => {
         if (signal.aborted || isStopping) {
-          clearInterval(timerInterval);
+          clearInterval(liveMetricTicker);
           return;
         }
         const now = Date.now();
-        const elapsedSec = Math.floor((now - startTime) / 1000);
+        const elapsedSec = Math.max(0, Math.floor((now - startTime) / 1000));
         const durStr = formatDurationClient(elapsedSec);
 
         metricEta.textContent = durStr;
         metricSize.textContent = formatBytesClient(totalBytes);
 
         const speedElapsed = (now - lastSpeedTime) / 1000;
-        if (speedElapsed >= 0.8) {
+        if (speedElapsed >= 0.5) {
           const speedBps = (totalBytes - lastBytes) / (speedElapsed || 1);
           if (speedBps > 0) {
             metricSpeed.textContent = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
@@ -2066,7 +2066,7 @@
         if (!isStopping) {
           btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
         }
-      }, 500);
+      }, 250);
 
       let targetPlaylistUrl = streamUrl;
 
@@ -2091,19 +2091,24 @@
           headers['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
         }
 
-        // Try direct CDN fetch first with 10s timeout
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000);
-          const resp = await fetch(url, { headers, signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (resp.ok) {
-            const ab = await resp.arrayBuffer();
-            return new Uint8Array(ab);
+        // Fast direct CDN attempt (1.2s timeout)
+        if (directCdnWorks !== false) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1200);
+            const resp = await fetch(url, { headers, signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (resp.ok) {
+              directCdnWorks = true;
+              const ab = await resp.arrayBuffer();
+              return new Uint8Array(ab);
+            }
+          } catch (e) {
+            directCdnWorks = false;
           }
-        } catch (e) {}
+        }
 
-        // Fallback to proxy segment in case of CORS or network filters
+        // Fallback to high-speed proxy
         try {
           const proxyUrl = `/api/proxy-segment?url=${encodeURIComponent(url)}`;
           const proxyResp = await fetch(proxyUrl, { headers, signal });
@@ -2133,7 +2138,6 @@
           let newSegments = [];
           if (isFirstPoll) {
             isFirstPoll = false;
-            // On first poll, mark older segments as seen and take only the last 2 newest to start capturing immediately
             const startIndex = Math.max(0, segments.length - 2);
             for (let i = 0; i < startIndex; i++) {
               seenSegmentUrls.add(getSegmentKey(segments[i]));
@@ -2162,7 +2166,7 @@
       const finalizeRecording = async (reason) => {
         if (isStopping) return;
         isStopping = true;
-        clearInterval(timerInterval);
+        clearInterval(liveMetricTicker);
         clearInterval(pollInterval);
         isLiveRecordingActive = false;
         stopLiveRecordingFn = null;
@@ -2235,8 +2239,127 @@
       }, 1500);
     }
 
-    // In-Browser High-Speed Stream Downloader for VODs (Bypasses serverless timeouts, runs at full client bandwidth)
+    // Direct MP4 / Static Video File Downloader with Live Byte-Stream Tracking
+    async function startDirectMediaDownload(url, filename) {
+      clientDownloadAbortController = new AbortController();
+      const signal = clientDownloadAbortController.signal;
+
+      btnStartDownload.disabled = true;
+      clearError();
+      resetProgress();
+      progressBox.style.display = 'block';
+      metricStatus.textContent = 'DOWNLOADING';
+      metricSpeed.textContent = 'Connecting...';
+      metricSize.textContent = '0 B';
+      metricEta.textContent = '--:--';
+      progressStatusLabel.textContent = `Downloading ${filename}...`;
+      progressBarFill.style.width = '5%';
+      progressPercentageLabel.textContent = '0%';
+
+      try {
+        let streamRes = await fetch(url, { signal }).catch(() => null);
+        if (!streamRes || !streamRes.ok) {
+          // Fallback through proxy
+          streamRes = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+        }
+        if (!streamRes.ok) {
+          throw new Error(`Server returned status ${streamRes.status}`);
+        }
+
+        const contentLength = Number(streamRes.headers.get('content-length')) || 0;
+        const reader = streamRes.body.getReader();
+        const chunks = [];
+        let receivedBytes = 0;
+        const startTime = Date.now();
+        let lastTime = startTime;
+        let lastBytes = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          chunks.push(value);
+          receivedBytes += value.length;
+
+          const now = Date.now();
+          const elapsedSec = (now - lastTime) / 1000;
+          if (elapsedSec >= 0.25) {
+            const speedBps = (receivedBytes - lastBytes) / (elapsedSec || 1);
+            const speedMb = (speedBps / (1024 * 1024)).toFixed(2);
+            metricSpeed.textContent = `${speedMb} MB/s`;
+            metricSize.textContent = contentLength > 0 ? `${formatBytesClient(receivedBytes)} / ${formatBytesClient(contentLength)}` : formatBytesClient(receivedBytes);
+
+            if (contentLength > 0) {
+              const pct = Math.min(99, Math.round((receivedBytes / contentLength) * 100));
+              progressBarFill.style.width = `${pct}%`;
+              progressPercentageLabel.textContent = `${pct}%`;
+              progressStatusLabel.textContent = `Downloading (${pct}% • ${formatBytesClient(receivedBytes)})`;
+
+              const remainingBytes = contentLength - receivedBytes;
+              const etaSec = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+              metricEta.textContent = formatDurationClient(etaSec);
+            } else {
+              progressStatusLabel.textContent = `Downloading (${formatBytesClient(receivedBytes)})...`;
+            }
+
+            lastBytes = receivedBytes;
+            lastTime = now;
+          }
+        }
+
+        if (signal.aborted) return;
+
+        metricStatus.textContent = 'FINALIZING';
+        progressStatusLabel.textContent = 'Finalizing MP4 video file...';
+        progressPercentageLabel.textContent = '100%';
+        progressBarFill.style.width = '100%';
+
+        const fileBlob = new Blob(chunks, { type: 'video/mp4' });
+        if (cachedBlobUrl) {
+          window.URL.revokeObjectURL(cachedBlobUrl);
+        }
+        cachedBlobUrl = window.URL.createObjectURL(fileBlob);
+
+        const autoLink = document.createElement('a');
+        autoLink.style.display = 'none';
+        autoLink.href = cachedBlobUrl;
+        autoLink.download = filename;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        setTimeout(() => autoLink.remove(), 2000);
+
+        lastFinishedJob = {
+          id: 'client_' + Date.now(),
+          filename: filename,
+          status: 'completed',
+          size: formatBytesClient(receivedBytes),
+          speed: metricSpeed.textContent
+        };
+
+        progressStatusLabel.textContent = '✅ Download Completed!';
+        metricStatus.textContent = 'READY';
+        metricEta.textContent = '00:00';
+        metricSize.textContent = formatBytesClient(receivedBytes);
+        metricSpeed.textContent = 'Done';
+        completedActions.style.display = 'block';
+        btnStartDownload.disabled = false;
+
+        showToast(`🎉 Download complete: ${filename}`, 'success');
+
+      } catch (err) {
+        if (signal.aborted) return;
+        showError('Download Error', err.message);
+        btnStartDownload.disabled = false;
+      }
+    }
+
+    // In-Browser High-Speed Stream Downloader for Clips & VODs (Bypasses serverless timeouts, runs at full client bandwidth)
     async function startClientHlsDownload(streamUrl, mediaTitle, resolution) {
+      if (streamUrl && !streamUrl.includes('.m3u8') && (streamUrl.endsWith('.mp4') || streamUrl.endsWith('.webm') || streamUrl.includes('.mp4?'))) {
+        const cleanTitle = (mediaTitle || 'kick_clip').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
+        return startDirectMediaDownload(streamUrl, `${cleanTitle}.mp4`);
+      }
+
       clientDownloadAbortController = new AbortController();
       const signal = clientDownloadAbortController.signal;
 
@@ -2249,11 +2372,11 @@
       metricSize.textContent = '0 B';
       metricEta.textContent = '--:--';
       progressStatusLabel.textContent = 'Fetching stream playlist...';
-      progressBarFill.style.width = '2%';
+      progressBarFill.style.width = '3%';
       progressPercentageLabel.textContent = '0%';
 
       try {
-        const segRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`);
+        const segRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`, { signal });
         if (!segRes.ok) {
           const err = await segRes.json().catch(() => ({}));
           throw new Error(err.error || `Server error ${segRes.status}`);
@@ -2266,12 +2389,12 @@
         }
 
         const totalSegments = segments.length;
-        const cleanTitle = (mediaTitle || 'kick_stream').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
+        const cleanTitle = (mediaTitle || 'kick_video').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
         const resTag = resolution ? `_${resolution.replace(/[^\w]/g, '')}` : '';
         const filename = `${cleanTitle}${resTag}.mp4`;
 
         metricStatus.textContent = 'DOWNLOADING';
-        progressStatusLabel.textContent = `Downloading ${totalSegments} video segments...`;
+        progressStatusLabel.textContent = `Downloading ${totalSegments} segments...`;
         showToast(`⚡ Turbo downloading ${totalSegments} segments directly...`, 'info');
 
         let completedSegments = 0;
@@ -2282,10 +2405,39 @@
         let directCdnWorks = null;
 
         const chunks = [];
-        const concurrency = 6; // 6 parallel workers for optimal mobile & desktop throughput
+        const concurrency = 6;
         let nextIndex = 0;
         const downloadedMap = new Map();
         let nextToWrite = 0;
+
+        // Continuous high-resolution UI update loop (every 250ms)
+        downloadMetricTicker = setInterval(() => {
+          if (signal.aborted || completedSegments >= totalSegments) {
+            clearInterval(downloadMetricTicker);
+            return;
+          }
+          const now = Date.now();
+          const elapsedSec = (now - lastTime) / 1000;
+          if (elapsedSec >= 0.25) {
+            const speedBps = (totalBytes - lastBytes) / (elapsedSec || 1);
+            if (speedBps > 0) {
+              metricSpeed.textContent = `${(speedBps / (1024 * 1024)).toFixed(2)} MB/s`;
+            } else if (totalBytes > 0) {
+              metricSpeed.textContent = 'Downloading...';
+            }
+            metricSize.textContent = formatBytesClient(totalBytes);
+
+            if (completedSegments > 0) {
+              const remainingSegs = totalSegments - completedSegments;
+              const avgTimePerSeg = (now - startTime) / 1000 / completedSegments;
+              const remainingSec = Math.max(0, Math.round(remainingSegs * avgTimePerSeg));
+              metricEta.textContent = formatDurationClient(remainingSec);
+            }
+
+            lastBytes = totalBytes;
+            lastTime = now;
+          }
+        }, 250);
 
         const flushMemory = () => {
           while (downloadedMap.has(nextToWrite)) {
@@ -2307,10 +2459,11 @@
             headers['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
           }
 
+          // Direct CDN with fast 1.2s timeout
           if (directCdnWorks !== false) {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000);
+              const timeoutId = setTimeout(() => controller.abort(), 1200);
               const resp = await fetch(url, { headers, signal: controller.signal });
               clearTimeout(timeoutId);
               if (resp.ok) {
@@ -2323,7 +2476,7 @@
             }
           }
 
-          // Fallback to proxy segment in case of CORS or network filters
+          // Fallback to high-speed proxy
           try {
             const proxyUrl = `/api/proxy-segment?url=${encodeURIComponent(url)}`;
             const proxyResp = await fetch(proxyUrl, { headers, signal });
@@ -2345,7 +2498,7 @@
 
             if (signal.aborted) return;
 
-            if (buf) {
+            if (buf && buf.byteLength > 0) {
               downloadedMap.set(idx, buf);
               totalBytes += buf.byteLength;
             } else {
@@ -2355,27 +2508,10 @@
             completedSegments++;
             flushMemory();
 
-            const now = Date.now();
             const pct = Math.min(99, Math.round((completedSegments / totalSegments) * 100));
             progressPercentageLabel.textContent = `${pct}%`;
             progressBarFill.style.width = `${pct}%`;
-            progressStatusLabel.textContent = `Downloading (${completedSegments}/${totalSegments} segments - ${pct}%)`;
-
-            const elapsedSec = (now - lastTime) / 1000;
-            if (elapsedSec >= 0.3 || completedSegments === totalSegments) {
-              const speedBps = (totalBytes - lastBytes) / (elapsedSec || 1);
-              const speedMb = (speedBps / (1024 * 1024)).toFixed(2);
-              metricSpeed.textContent = `${speedMb} MB/s`;
-              metricSize.textContent = formatBytesClient(totalBytes);
-
-              const remainingSegs = totalSegments - completedSegments;
-              const avgTimePerSeg = (now - startTime) / 1000 / completedSegments;
-              const remainingSec = Math.round(remainingSegs * avgTimePerSeg);
-              metricEta.textContent = formatDurationClient(remainingSec);
-
-              lastBytes = totalBytes;
-              lastTime = now;
-            }
+            progressStatusLabel.textContent = `Downloading (${completedSegments}/${totalSegments} segments • ${pct}%)`;
           }
         };
 
@@ -2386,6 +2522,7 @@
 
         await Promise.all(workers);
         flushMemory();
+        clearInterval(downloadMetricTicker);
 
         if (signal.aborted) {
           showToast('Download cancelled', 'info');
@@ -2425,12 +2562,14 @@
         metricStatus.textContent = 'READY';
         metricEta.textContent = '00:00';
         metricSize.textContent = formatBytesClient(totalBytes);
+        metricSpeed.textContent = 'Done';
         completedActions.style.display = 'block';
         btnStartDownload.disabled = false;
 
         showToast(`🎉 Download complete: ${filename}`, 'success');
 
       } catch (err) {
+        clearInterval(downloadMetricTicker);
         if (signal.aborted) return;
         console.error('Client download error:', err);
         showError('Download Error', err.message);
@@ -2739,6 +2878,14 @@
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      if (liveMetricTicker) {
+        clearInterval(liveMetricTicker);
+        liveMetricTicker = null;
+      }
+      if (downloadMetricTicker) {
+        clearInterval(downloadMetricTicker);
+        downloadMetricTicker = null;
       }
       if (clientDownloadAbortController) {
         clientDownloadAbortController.abort();
