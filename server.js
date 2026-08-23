@@ -127,24 +127,31 @@ async function fetchKickText(url, referer = 'https://kick.com/') {
   }
 }
 
-async function fetchKickBuffer(url, referer = 'https://kick.com/') {
+async function fetchKickBuffer(target, referer = 'https://kick.com/') {
+  const url = (typeof target === 'object' && target?.url) ? target.url : target;
+  const byteRange = (typeof target === 'object' && target?.byteRange) ? target.byteRange : null;
+
+  const reqHeaders = {
+    'User-Agent': BROWSER_HEADERS['User-Agent'],
+    'Referer': referer,
+    'Origin': 'https://kick.com'
+  };
+
+  if (byteRange && byteRange.length) {
+    reqHeaders['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
+  }
+
   try {
     const segRes = await axios.get(url, {
       responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-        'Referer': referer,
-        'Origin': 'https://kick.com'
-      },
+      headers: reqHeaders,
       timeout: 20000
     });
     return Buffer.from(segRes.data);
   } catch (err) {
     try {
       const gRes = await gotScraping.get(url, {
-        headers: {
-          'Referer': referer
-        },
+        headers: reqHeaders,
         timeout: { request: 20000 },
         responseType: 'buffer'
       });
@@ -978,41 +985,119 @@ async function runNativeHlsDownload(streamUrl, filepath, job) {
   }
 }
 
+// Fallback pure Node.js continuous live stream recorder
+async function runNativeLiveStreamRecording(streamUrl, filepath, job) {
+  try {
+    const writer = fs.createWriteStream(filepath);
+    const seenSegments = new Set();
+    let totalBytes = 0;
+    let isStopped = false;
+
+    job.abort = () => {
+      isStopped = true;
+      try { writer.end(); } catch (e) {}
+    };
+    job.stop = job.abort;
+
+    while (!isStopped && job.status !== 'error') {
+      try {
+        const text = await fetchKickText(streamUrl);
+        if (text && typeof text === 'string') {
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+          const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf('/') + 1);
+
+          for (const line of lines) {
+            if (line.startsWith('#') || !line) continue;
+            const segUrl = line.startsWith('http') ? line : new URL(line, baseUrl).toString();
+
+            if (!seenSegments.has(segUrl)) {
+              seenSegments.add(segUrl);
+              try {
+                const segRes = await axios.get(segUrl, {
+                  responseType: 'arraybuffer',
+                  headers: {
+                    'User-Agent': BROWSER_HEADERS['User-Agent'],
+                    'Referer': 'https://kick.com/'
+                  },
+                  timeout: 10000
+                });
+                const buf = Buffer.from(segRes.data);
+                writer.write(buf);
+                totalBytes += buf.length;
+                job.rawBytes = totalBytes;
+                job.size = formatBytes(totalBytes);
+                job.eta = formatDuration(Math.floor((Date.now() - job.startTime) / 1000));
+              } catch (se) {}
+            }
+          }
+        }
+      } catch (pe) {}
+
+      if (isStopped) break;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    writer.end();
+    job.status = 'completed';
+    job.progress = 100;
+  } catch (err) {
+    job.status = 'error';
+    job.error = err.message;
+  }
+}
+
 // Execute Kick Stream Download / Recording using FFmpeg with pure Node.js fallback
 function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) {
   return new Promise(async (resolve, reject) => {
     try {
       let playlistUrl = streamUrl;
       
-      // If master playlist, resolve to best variant if needed
+      let effectiveDuration = Number(totalDuration) || 0;
+
+      // If master playlist or duration unknown, inspect playlist
       try {
         const text = await fetchKickText(playlistUrl);
-        if (text && typeof text === 'string' && text.includes('#EXT-X-STREAM-INF:')) {
-          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-          const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
-          let bestVariant = null;
-          let maxBw = 0;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-              const next = lines[i + 1];
-              if (next && !next.startsWith('#')) {
-                const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
-                const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
-                const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
-                if (bw > maxBw || !bestVariant) {
-                  maxBw = bw;
-                  bestVariant = fullUrl;
+        if (text && typeof text === 'string') {
+          if (text.includes('#EXT-X-STREAM-INF:')) {
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+            let bestVariant = null;
+            let maxBw = 0;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+                const next = lines[i + 1];
+                if (next && !next.startsWith('#')) {
+                  const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+                  const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+                  const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+                  if (bw > maxBw || !bestVariant) {
+                    maxBw = bw;
+                    bestVariant = fullUrl;
+                  }
                 }
               }
             }
+            if (bestVariant) {
+              playlistUrl = bestVariant;
+            }
           }
-          if (bestVariant) {
-            playlistUrl = bestVariant;
+
+          // If duration is 0, estimate from playlist
+          if (effectiveDuration <= 0 && !isLive) {
+            const lines = text.split('\n');
+            let sumDur = 0;
+            for (const l of lines) {
+              if (l.startsWith('#EXTINF:')) {
+                const m = l.match(/#EXTINF:([\d\.]+)/);
+                if (m) sumDur += parseFloat(m[1]);
+              }
+            }
+            if (sumDur > 0) effectiveDuration = Math.round(sumDur);
           }
         }
       } catch (e) {}
 
-      console.log(`[Job ${job.id}] Starting Kick ${isLive ? 'Live Recording' : 'VOD Download'} for: ${playlistUrl}`);
+      console.log(`[Job ${job.id}] Starting Kick ${isLive ? 'Live Recording' : 'VOD Download'} (Dur: ${effectiveDuration}s) for: ${playlistUrl}`);
 
       const headersStr = `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`;
 
@@ -1021,8 +1106,13 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
         ffmpegArgs = [
           '-y',
           '-headers', headersStr,
+          '-reconnect', '1',
+          '-reconnect_at_eof', '1',
+          '-reconnect_streamed', '1',
+          '-reconnect_delay_max', '2',
           '-i', playlistUrl,
           '-c', 'copy',
+          '-bsf:a', 'aac_adtstoasc',
           '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
           filepath
         ];
@@ -1049,8 +1139,10 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
         if (fs.existsSync(filepath)) {
           try {
             const stats = fs.statSync(filepath);
-            job.rawBytes = stats.size;
-            job.size = formatBytes(stats.size);
+            if (stats.size > 0) {
+              job.rawBytes = stats.size;
+              job.size = formatBytes(stats.size);
+            }
 
             const now = Date.now();
             const elapsed = (now - lastTime) / 1000;
@@ -1078,9 +1170,20 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
         const text = data.toString();
         
         // Parse time=HH:MM:SS.ms
-        const timeMatch = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d+)/);
+        const timeMatch = text.match(/time=(\d{2}:\d{2}:\d{2}\.?\d*)/);
         const speedMatch = text.match(/speed=\s*([\d\.]+)x/);
         const bitrateMatch = text.match(/bitrate=\s*([\d\.]+kbits\/s)/);
+        const sizeMatch = text.match(/size=\s*([\d\.]+\s*(?:kB|MB|B|KiB|MiB))/i);
+
+        if (sizeMatch && (!job.size || job.size === '0 B' || job.size.endsWith('B'))) {
+          const rawSize = sizeMatch[1].trim();
+          if (rawSize.endsWith('kB')) {
+            const kb = parseFloat(rawSize);
+            job.size = formatBytes(kb * 1024);
+          } else {
+            job.size = rawSize;
+          }
+        }
 
         if (speedMatch) {
           lastSpeedSec = parseFloat(speedMatch[1]) || 1;
@@ -1092,14 +1195,21 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
             job.eta = formatDuration(Math.floor((Date.now() - job.startTime) / 1000));
             if (bitrateMatch) {
               job.speed = bitrateMatch[1];
+            } else if (speedMatch) {
+              job.speed = `${speedMatch[1]}x (Live)`;
             }
-          } else if (totalDuration > 0) {
-            const pct = Math.min(99, Math.max(1, Math.round((currentSec / totalDuration) * 100)));
-            job.progress = pct;
-            const remainingSec = Math.max(0, Math.round((totalDuration - currentSec) / Math.max(1, lastSpeedSec)));
-            job.eta = formatDuration(remainingSec);
+          } else {
+            if (effectiveDuration > 0) {
+              const pct = Math.min(99, Math.max(1, Math.round((currentSec / effectiveDuration) * 100)));
+              job.progress = pct;
+              const remainingSec = Math.max(0, Math.round((effectiveDuration - currentSec) / Math.max(1, lastSpeedSec)));
+              job.eta = formatDuration(remainingSec);
+            } else {
+              job.progress = Math.min(95, Math.max(1, Math.round(currentSec / 30)));
+              job.eta = formatDuration(currentSec);
+            }
             if (speedMatch) {
-              job.speed = `${speedMatch[1]}x (${job.speed || 'Turbo'})`;
+              job.speed = `${speedMatch[1]}x Turbo`;
             }
           }
         }
@@ -1119,12 +1229,12 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
             job.progress = 100;
             job.speed = 'Done';
             job.eta = isLive ? formatDuration(Math.floor((Date.now() - job.startTime) / 1000)) : 'Done';
-            console.log(`[Job ${job.id}] Kick download completed successfully: ${job.size}`);
+            console.log(`[Job ${job.id}] Kick ${isLive ? 'Live Recording' : 'Download'} finalized successfully: ${job.size}`);
             return resolve();
           }
         }
 
-        if (code === 0) {
+        if (code === 0 || code === 255) {
           job.status = 'completed';
           job.progress = 100;
           job.eta = 'Done';

@@ -2621,6 +2621,15 @@
       clearError();
       resetProgress();
 
+      // For Kick VODs and Clips: Run high-speed browser-direct downloader so it saves straight into Chrome/Phone Downloads
+      if (currentMedia.platform === 'kick' && !currentMedia.isLive) {
+        const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
+        const qualityName = selectedQuality ? selectedQuality.quality : (currentMedia.type === 'clip' ? 'Clip' : 'Source');
+        if (streamUrl) {
+          return startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
+        }
+      }
+
       try {
         let endpoint = '';
         let payload = {};
@@ -2803,7 +2812,7 @@
       const btnSaveLabel = document.getElementById('btn-save-file-label');
       const safeFilename = job.filename || 'video.mp4';
 
-      // If already packaged client-side in memory
+      // 1. If already packaged client-side in memory
       if (job.id && job.id.startsWith('client_') && cachedBlobUrl) {
         const autoLink = document.createElement('a');
         autoLink.style.display = 'none';
@@ -2817,56 +2826,39 @@
         return;
       }
       
-      try {
-        if (btnSaveLabel) btnSaveLabel.textContent = '⏳ Fetching MP4 for Phone...';
-        showToast('📥 Packaging and preparing video file...', 'info');
+      const fileUrl = `/api/file/${job.id}`;
 
-        const fileUrl = `/api/file/${job.id}`;
-        const response = await fetch(fileUrl);
-
-        if (!response.ok) {
-          throw new Error(`Server returned status ${response.status}`);
-        }
-
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('text/html')) {
-          // If proxy returned cookie-check HTML, warn and fallback
-          throw new Error('Preview proxy intercepted download. Please click Save again.');
-        }
-
-        const blob = await response.blob();
-        const mimeType = (job.filename && job.filename.endsWith('.mp3')) ? 'audio/mpeg' : 'video/mp4';
-        const fileBlob = new Blob([blob], { type: mimeType });
-
-        if (cachedBlobUrl) {
-          window.URL.revokeObjectURL(cachedBlobUrl);
-        }
-        cachedBlobUrl = window.URL.createObjectURL(fileBlob);
-
-        const safeFilename = job.filename || 'video.mp4';
-        const autoLink = document.createElement('a');
-        autoLink.style.display = 'none';
-        autoLink.href = cachedBlobUrl;
-        autoLink.download = safeFilename;
-        document.body.appendChild(autoLink);
-        autoLink.click();
-        setTimeout(() => autoLink.remove(), 1000);
-
-        if (btnSaveLabel) btnSaveLabel.textContent = '✅ Saved! Tap to Download Again';
-        showToast(`🎉 Video downloaded: ${safeFilename}`, 'success');
-      } catch (err) {
-        console.error('Blob download failed, attempting direct link:', err);
-        if (btnSaveLabel) btnSaveLabel.textContent = '💾 Tap to Download MP4';
-        
-        // Fallback: standard anchor click
-        const fallbackLink = document.createElement('a');
-        fallbackLink.href = `/api/file/${job.id}`;
-        fallbackLink.download = job.filename || 'video.mp4';
-        fallbackLink.target = '_blank';
-        document.body.appendChild(fallbackLink);
-        fallbackLink.click();
-        setTimeout(() => fallbackLink.remove(), 1000);
+      // Update the button directly so manual taps always work with 100% certainty
+      if (btnSaveFinishedFile) {
+        btnSaveFinishedFile.href = fileUrl;
+        btnSaveFinishedFile.setAttribute('download', safeFilename);
+        btnSaveFinishedFile.setAttribute('target', '_blank');
       }
+
+      // 2. Trigger automatic download via dynamic anchor
+      const autoLink = document.createElement('a');
+      autoLink.style.display = 'none';
+      autoLink.href = fileUrl;
+      autoLink.setAttribute('download', safeFilename);
+      autoLink.setAttribute('target', '_blank');
+      document.body.appendChild(autoLink);
+      autoLink.click();
+      setTimeout(() => autoLink.remove(), 2000);
+
+      // 3. Fallback invisible iframe trigger for mobile browsers
+      try {
+        let dlFrame = document.getElementById('hidden-download-frame');
+        if (!dlFrame) {
+          dlFrame = document.createElement('iframe');
+          dlFrame.id = 'hidden-download-frame';
+          dlFrame.style.display = 'none';
+          document.body.appendChild(dlFrame);
+        }
+        dlFrame.src = fileUrl;
+      } catch (e) {}
+
+      if (btnSaveLabel) btnSaveLabel.textContent = '💾 Tap to Download MP4 Again';
+      showToast(`🎉 Video ready! Downloading ${safeFilename}`, 'success');
     }
 
     function onJobCompleted(job) {
