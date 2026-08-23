@@ -1908,7 +1908,7 @@
         const card = document.createElement('div');
         card.className = `quality-option ${opt === selectedQuality ? 'selected' : ''}`;
         
-        const isBestBadge = opt.isBest ? '<span class="best-tag">BEST</span>' : '<span style="font-size: 9px; font-weight: 700; color: var(--kick-green); background: rgba(83, 252, 24, 0.12); padding: 1px 5px; border-radius: 3px;">⚡ TURBO</span>';
+        const isBestBadge = opt.isBest ? '<span class="best-tag">BEST QUALITY</span>' : '<span style="font-size: 9px; font-weight: 700; color: var(--kick-green); background: rgba(83, 252, 24, 0.12); padding: 1px 5px; border-radius: 3px;">⚡ 10x TURBO</span>';
         const titleText = opt.quality || opt.label || opt.bitrate || 'Standard';
         const subInfo = opt.bandwidthStr || opt.filesizeStr || opt.resolution || (opt.fps ? `${opt.fps} fps` : '');
 
@@ -1917,7 +1917,7 @@
             <span>${titleText}</span>
             ${isBestBadge}
           </div>
-          ${subInfo ? `<div class="quality-info">${subInfo} &bull; ⚡ High Speed</div>` : '<div class="quality-info">⚡ High Speed (c:copy)</div>'}
+          ${subInfo ? `<div class="quality-info">${subInfo} &bull; ⚡ 100+ Mbps Turbo</div>` : '<div class="quality-info">⚡ 100+ Mbps (Pure Stream Copy)</div>'}
         `;
 
         card.addEventListener('click', () => {
@@ -1964,7 +1964,7 @@
         btnStartDownload.style.color = '';
         btnStartDownload.style.boxShadow = '';
       } else {
-        btnDownloadLabel.textContent = `⚡ Download ${qName || 'MP4'} (High-Speed c:copy)`;
+        btnDownloadLabel.textContent = `⚡ Download ${qName || 'MP4'} (Full Quality • 10x Turbo)`;
         btnStartDownload.style.background = '';
         btnStartDownload.style.color = '';
         btnStartDownload.style.boxShadow = '';

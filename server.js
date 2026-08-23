@@ -320,9 +320,15 @@ async function parseMasterPlaylist(masterUrl) {
 
 function getYtDlpBin() {
   const localBin = path.join(__dirname, 'bin', 'yt-dlp');
-  if (fs.existsSync(localBin)) return localBin;
+  if (fs.existsSync(localBin)) {
+    try { fs.chmodSync(localBin, 0o755); } catch (e) {}
+    return localBin;
+  }
   const tmpBin = '/tmp/yt-dlp';
-  if (fs.existsSync(tmpBin)) return tmpBin;
+  if (fs.existsSync(tmpBin)) {
+    try { fs.chmodSync(tmpBin, 0o755); } catch (e) {}
+    return tmpBin;
+  }
   return 'yt-dlp';
 }
 
@@ -1047,14 +1053,200 @@ async function runNativeLiveStreamRecording(streamUrl, filepath, job) {
 }
 
 // Execute Kick Stream Download / Recording using FFmpeg with pure Node.js fallback
-function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) {
+function runKickVodYtDlpDownload(playlistUrl, filepath, job, totalDuration, targetQuality = '') {
+  return new Promise((resolve, reject) => {
+    try {
+      const ytBin = getYtDlpBin();
+      const ytdlpArgs = [
+        '--no-warnings',
+        '--newline',
+        '--concurrent-fragments', '16',
+        '-N', '8',
+        '--socket-timeout', '15',
+        '--retries', '20',
+        '--fragment-retries', '20',
+        '--file-access-retries', '10',
+        '--retry-sleep', 'fragment:1',
+        '--add-header', `User-Agent: ${BROWSER_HEADERS['User-Agent']}`,
+        '--add-header', 'Referer: https://kick.com/',
+        '--merge-output-format', 'mp4',
+        '--progress-template', '%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_estimate_str)s|%(progress.fragment_index)s|%(progress.fragment_count)s',
+        '-o', filepath
+      ];
+
+      // If master playlist and target quality is specified, match format
+      const heightMatch = targetQuality ? String(targetQuality).match(/(\d{3,4})/) : null;
+      if (heightMatch && playlistUrl.includes('master.m3u8')) {
+        const h = parseInt(heightMatch[1], 10);
+        ytdlpArgs.push('-f', `best[height<=${h}]/best`);
+      }
+
+      ytdlpArgs.push(playlistUrl);
+
+      console.log(`[Job ${job.id}] Starting Resilient 10x Turbo Kick VOD Download via yt-dlp (Target Quality: ${targetQuality || 'Original'}): ${playlistUrl}`);
+      const ytdlpProc = spawn(ytBin, ytdlpArgs);
+      job.process = ytdlpProc;
+
+      let lastActivityTime = Date.now();
+      let lastRecordedBytes = 0;
+      let stdoutBuffer = '';
+
+      const statInterval = setInterval(() => {
+        const possiblePaths = [filepath, `${filepath}.part`, `${filepath}.temp.mp4`];
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            try {
+              const stats = fs.statSync(p);
+              if (stats.size > lastRecordedBytes) {
+                lastRecordedBytes = stats.size;
+                lastActivityTime = Date.now();
+              }
+              job.rawBytes = stats.size;
+              job.size = formatBytes(stats.size);
+              break;
+            } catch (e) {}
+          }
+        }
+
+        // Stall Watchdog: If no activity for > 25 seconds, inspect progress
+        if (job.status === 'downloading' && Date.now() - lastActivityTime > 25000) {
+          console.warn(`[Job ${job.id}] Potential stall detected (25s without disk/progress update). Checking process status...`);
+          lastActivityTime = Date.now(); // reset window to avoid loop
+        }
+
+        if (job.status === 'completed' || job.status === 'error') {
+          clearInterval(statInterval);
+        }
+      }, 400);
+
+      ytdlpProc.stdout.on('data', (data) => {
+        lastActivityTime = Date.now();
+        stdoutBuffer += data.toString().replace(/\r/g, '\n');
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() || ''; // Keep remainder in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.includes('|')) {
+            const parts = trimmed.split('|');
+            if (parts.length >= 4) {
+              const [pctStr, speedStr, etaStr, sizeStr, fragIdxStr, fragCountStr] = parts;
+              const pct = parseFloat(pctStr.replace('%', ''));
+              if (!isNaN(pct)) {
+                job.progress = Math.min(99, Math.max(1, Math.round(pct)));
+              }
+              if (speedStr && speedStr !== 'NA') {
+                const sClean = speedStr.trim();
+                const mibMatch = sClean.match(/([\d\.]+)\s*([KMGT]?i?B\/s)/i);
+                if (mibMatch) {
+                  let val = parseFloat(mibMatch[1]);
+                  const unit = mibMatch[2].toUpperCase();
+                  if (unit.startsWith('K')) val = val / 1024;
+                  else if (unit.startsWith('G')) val = val * 1024;
+                  const mbps = (val * 8).toFixed(0);
+                  job.speed = `${val.toFixed(1)} MB/s (${mbps} Mbps) ⚡ Turbo`;
+                } else {
+                  job.speed = sClean;
+                }
+              }
+              if (etaStr && etaStr !== 'NA' && etaStr !== 'Unknown') job.eta = etaStr.trim();
+              if (sizeStr && sizeStr !== 'NA' && sizeStr !== 'Unknown') job.size = sizeStr.trim();
+
+              const fragIdx = parseInt(fragIdxStr, 10);
+              const fragCount = parseInt(fragCountStr, 10);
+              if (!isNaN(fragIdx) && !isNaN(fragCount) && fragCount > 0) {
+                const fragPct = Math.min(99, Math.max(1, Math.round((fragIdx / fragCount) * 100)));
+                job.progress = Math.max(job.progress, fragPct);
+              }
+            }
+          } else if (trimmed.includes('[download]') && trimmed.includes('%')) {
+            const match = trimmed.match(/(\d+\.?\d*)%\s+of\s+~?([\d\.\w]+)\s+at\s+([\d\.\w\/]+)\s+ETA\s+([\d:]+)/);
+            if (match) {
+              job.progress = Math.min(99, Math.round(parseFloat(match[1])));
+              job.size = match[2];
+              const sRaw = match[3];
+              const mibMatch = sRaw.match(/([\d\.]+)\s*([KMGT]?i?B\/s)/i);
+              if (mibMatch) {
+                let val = parseFloat(mibMatch[1]);
+                const unit = mibMatch[2].toUpperCase();
+                if (unit.startsWith('K')) val = val / 1024;
+                else if (unit.startsWith('G')) val = val * 1024;
+                const mbps = (val * 8).toFixed(0);
+                job.speed = `${val.toFixed(1)} MB/s (${mbps} Mbps) ⚡ Turbo`;
+              } else {
+                job.speed = sRaw;
+              }
+              job.eta = match[4];
+            }
+          }
+        }
+      });
+
+      ytdlpProc.stderr.on('data', (data) => {
+        const msg = data.toString();
+        if (!msg.includes('WARNING') && msg.includes('ERROR') && !msg.includes('Interrupted')) {
+          job.error = msg.trim();
+        }
+      });
+
+      ytdlpProc.on('close', (code) => {
+        clearInterval(statInterval);
+        job.process = null;
+
+        if (fs.existsSync(filepath)) {
+          const stats = fs.statSync(filepath);
+          job.rawBytes = stats.size;
+          job.size = formatBytes(stats.size);
+
+          if (stats.size > 1024 * 100 && (code === 0 || code === null)) {
+            job.status = 'completed';
+            job.progress = 100;
+            job.speed = 'Done';
+            job.eta = 'Done';
+            console.log(`[Job ${job.id}] Kick VOD download successfully finalized: ${job.size}`);
+            return resolve();
+          }
+        }
+
+        if (code === 0) {
+          job.status = 'completed';
+          job.progress = 100;
+          job.eta = 'Done';
+          return resolve();
+        } else if (job.status !== 'completed' && job.status !== 'error') {
+          console.warn(`[Job ${job.id}] yt-dlp exited with code ${code}, error: ${job.error}`);
+          job.status = 'error';
+          job.error = job.error || `Download exited with code ${code}`;
+          reject(new Error(job.error));
+        }
+      });
+
+      ytdlpProc.on('error', (err) => {
+        clearInterval(statInterval);
+        job.process = null;
+        job.status = 'error';
+        job.error = `yt-dlp engine error: ${err.message}`;
+        reject(err);
+      });
+    } catch (err) {
+      job.status = 'error';
+      job.error = err.message;
+      reject(err);
+    }
+  });
+}
+
+// Execute Kick Stream Download / Recording using FFmpeg with pure Node.js fallback
+function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration, targetQuality = '') {
   return new Promise(async (resolve, reject) => {
     try {
       let playlistUrl = streamUrl;
       
       let effectiveDuration = Number(totalDuration) || 0;
 
-      // If master playlist or duration unknown, inspect playlist
+      // If master playlist, inspect playlist and find variant matching targetQuality (or best)
       try {
         const text = await fetchKickText(playlistUrl);
         if (text && typeof text === 'string') {
@@ -1062,14 +1254,25 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
             const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
             const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
             let bestVariant = null;
+            let matchedVariant = null;
             let maxBw = 0;
+            const targetHMatch = targetQuality ? String(targetQuality).match(/(\d{3,4})/) : null;
+            const targetH = targetHMatch ? parseInt(targetHMatch[1], 10) : 0;
+
             for (let i = 0; i < lines.length; i++) {
               if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
                 const next = lines[i + 1];
                 if (next && !next.startsWith('#')) {
                   const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+                  const resMatch = lines[i].match(/RESOLUTION=\d+x(\d+)/i);
                   const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+                  const h = resMatch ? parseInt(resMatch[1], 10) : 0;
                   const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+
+                  if (targetH > 0 && (h === targetH || lines[i].includes(`${targetH}p`) || next.includes(`${targetH}p`))) {
+                    matchedVariant = fullUrl;
+                  }
+
                   if (bw > maxBw || !bestVariant) {
                     maxBw = bw;
                     bestVariant = fullUrl;
@@ -1077,7 +1280,9 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
                 }
               }
             }
-            if (bestVariant) {
+            if (matchedVariant) {
+              playlistUrl = matchedVariant;
+            } else if (bestVariant) {
               playlistUrl = bestVariant;
             }
           }
@@ -1097,36 +1302,28 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
         }
       } catch (e) {}
 
-      console.log(`[Job ${job.id}] Starting Kick ${isLive ? 'Live Recording' : 'VOD Download'} (Dur: ${effectiveDuration}s) for: ${playlistUrl}`);
+      // For Kick VODs (non-live): Route to multi-threaded fragment engine for 100% full-length MP4 downloads
+      if (!isLive) {
+        return runKickVodYtDlpDownload(playlistUrl, filepath, job, effectiveDuration, targetQuality).then(resolve).catch(reject);
+      }
+
+      console.log(`[Job ${job.id}] Starting Kick Live Recording (Dur: ${effectiveDuration}s) for: ${playlistUrl}`);
 
       const headersStr = `User-Agent: ${BROWSER_HEADERS['User-Agent']}\r\nReferer: https://kick.com/\r\n`;
 
-      let ffmpegArgs = [];
-      if (isLive) {
-        ffmpegArgs = [
-          '-y',
-          '-headers', headersStr,
-          '-reconnect', '1',
-          '-reconnect_at_eof', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '2',
-          '-i', playlistUrl,
-          '-c', 'copy',
-          '-bsf:a', 'aac_adtstoasc',
-          '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-          filepath
-        ];
-      } else {
-        ffmpegArgs = [
-          '-y',
-          '-headers', headersStr,
-          '-i', playlistUrl,
-          '-c', 'copy',
-          '-bsf:a', 'aac_adtstoasc',
-          '-movflags', '+faststart',
-          filepath
-        ];
-      }
+      const ffmpegArgs = [
+        '-y',
+        '-headers', headersStr,
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '2',
+        '-i', playlistUrl,
+        '-c', 'copy',
+        '-bsf:a', 'aac_adtstoasc',
+        '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+        filepath
+      ];
 
       const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
       job.process = ffmpegProc;
@@ -1198,19 +1395,6 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
             } else if (speedMatch) {
               job.speed = `${speedMatch[1]}x (Live)`;
             }
-          } else {
-            if (effectiveDuration > 0) {
-              const pct = Math.min(99, Math.max(1, Math.round((currentSec / effectiveDuration) * 100)));
-              job.progress = pct;
-              const remainingSec = Math.max(0, Math.round((effectiveDuration - currentSec) / Math.max(1, lastSpeedSec)));
-              job.eta = formatDuration(remainingSec);
-            } else {
-              job.progress = Math.min(95, Math.max(1, Math.round(currentSec / 30)));
-              job.eta = formatDuration(currentSec);
-            }
-            if (speedMatch) {
-              job.speed = `${speedMatch[1]}x Turbo`;
-            }
           }
         }
       });
@@ -1229,7 +1413,7 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
             job.progress = 100;
             job.speed = 'Done';
             job.eta = isLive ? formatDuration(Math.floor((Date.now() - job.startTime) / 1000)) : 'Done';
-            console.log(`[Job ${job.id}] Kick ${isLive ? 'Live Recording' : 'Download'} finalized successfully: ${job.size}`);
+            console.log(`[Job ${job.id}] Kick Live Recording finalized successfully: ${job.size}`);
             return resolve();
           }
         }
@@ -1241,22 +1425,14 @@ function runKickStreamDownload(streamUrl, filepath, job, isLive, totalDuration) 
           return resolve();
         } else if (job.status !== 'completed') {
           console.warn(`[Job ${job.id}] FFmpeg exited with code ${code}, attempting native fallback...`);
-          if (isLive) {
-            runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
-          } else {
-            runNativeHlsDownload(playlistUrl, filepath, job).then(resolve).catch(reject);
-          }
+          runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
         }
       });
 
       ffmpegProc.on('error', (err) => {
         clearInterval(statTimer);
         console.warn(`[Job ${job.id}] FFmpeg spawn error (${err.message}), falling back to native engine`);
-        if (isLive) {
-          runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
-        } else {
-          runNativeHlsDownload(playlistUrl, filepath, job).then(resolve).catch(reject);
-        }
+        runNativeLiveStreamRecording(playlistUrl, filepath, job).then(resolve).catch(reject);
       });
 
     } catch (err) {
@@ -1303,7 +1479,7 @@ app.post('/api/download/hls', async (req, res) => {
   jobs.set(jobId, job);
 
   // Route to high-speed FFmpeg stream engine with auto-fallback
-  runKickStreamDownload(url, filepath, job, Boolean(isLive), Number(duration) || 0).catch(err => {
+  runKickStreamDownload(url, filepath, job, Boolean(isLive), Number(duration) || 0, quality).catch(err => {
     job.status = 'error';
     job.error = err.message;
   });
@@ -1431,7 +1607,7 @@ app.post('/api/download/youtube', async (req, res) => {
     type: isLiveStream ? 'youtube_live' : (isAudio ? 'youtube_audio' : 'youtube_video'),
     status: isLiveStream ? 'recording' : 'downloading',
     progress: 0,
-    speed: '0 MiB/s',
+    speed: '0.0 MB/s',
     size: '0 B',
     rawBytes: 0,
     eta: isLiveStream ? 'LIVE' : '--:--',
@@ -1446,14 +1622,17 @@ app.post('/api/download/youtube', async (req, res) => {
 
   jobs.set(jobId, job);
 
-  // Build yt-dlp arguments with high-speed multi-threaded acceleration
+  // Build yt-dlp arguments with high-speed multi-threaded acceleration (10x Turbo Engine)
   let ytdlpArgs = [
     '--no-warnings',
     '--newline',
     '--concurrent-fragments', '16',
     '-N', '8',
-    '--buffer-size', '16M',
-    '--http-chunk-size', '10M',
+    '--socket-timeout', '15',
+    '--retries', '20',
+    '--fragment-retries', '20',
+    '--file-access-retries', '10',
+    '--retry-sleep', 'fragment:1',
     '--progress-template', '%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s'
   ];
 
@@ -1481,6 +1660,10 @@ app.post('/api/download/youtube', async (req, res) => {
     const ytdlpProc = spawn(ytBin, ytdlpArgs);
     job.process = ytdlpProc;
 
+    let lastActivityTime = Date.now();
+    let lastRecordedBytes = 0;
+    let stdoutBuffer = '';
+
     // Track file size
     const statInterval = setInterval(() => {
       // yt-dlp might write to .part or .mp4
@@ -1489,6 +1672,10 @@ app.post('/api/download/youtube', async (req, res) => {
         if (fs.existsSync(p)) {
           try {
             const stats = fs.statSync(p);
+            if (stats.size > lastRecordedBytes) {
+              lastRecordedBytes = stats.size;
+              lastActivityTime = Date.now();
+            }
             job.rawBytes = stats.size;
             job.size = formatBytes(stats.size);
             break;
@@ -1498,32 +1685,61 @@ app.post('/api/download/youtube', async (req, res) => {
       if (job.status === 'completed' || job.status === 'error') {
         clearInterval(statInterval);
       }
-    }, 800);
+    }, 400);
 
     ytdlpProc.stdout.on('data', (data) => {
-      const text = data.toString();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      lastActivityTime = Date.now();
+      stdoutBuffer += data.toString().replace(/\r/g, '\n');
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.includes('|')) {
-          const parts = line.split('|');
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        if (trimmed.includes('|')) {
+          const parts = trimmed.split('|');
           if (parts.length >= 4) {
             const [pctStr, speedStr, etaStr, sizeStr] = parts;
             const pct = parseFloat(pctStr.replace('%', ''));
             if (!isNaN(pct)) {
-              job.progress = Math.min(99, Math.max(0, Math.round(pct)));
+              job.progress = Math.min(99, Math.max(1, Math.round(pct)));
             }
-            if (speedStr && speedStr !== 'NA') job.speed = speedStr.trim();
+            if (speedStr && speedStr !== 'NA') {
+              const sClean = speedStr.trim();
+              const mibMatch = sClean.match(/([\d\.]+)\s*([KMGT]?i?B\/s)/i);
+              if (mibMatch) {
+                let val = parseFloat(mibMatch[1]);
+                const unit = mibMatch[2].toUpperCase();
+                if (unit.startsWith('K')) val = val / 1024;
+                else if (unit.startsWith('G')) val = val * 1024;
+                const mbps = (val * 8).toFixed(0);
+                job.speed = `${val.toFixed(1)} MB/s (${mbps} Mbps) ⚡ Turbo`;
+              } else {
+                job.speed = sClean;
+              }
+            }
             if (etaStr && etaStr !== 'NA') job.eta = etaStr.trim();
             if (sizeStr && sizeStr !== 'NA') job.size = sizeStr.trim();
           }
-        } else if (line.includes('[download]') && line.includes('%')) {
+        } else if (trimmed.includes('[download]') && trimmed.includes('%')) {
           // Fallback regex for standard yt-dlp output
-          const match = line.match(/(\d+\.?\d*)%\s+of\s+~?([\d\.\w]+)\s+at\s+([\d\.\w\/]+)\s+ETA\s+([\d:]+)/);
+          const match = trimmed.match(/(\d+\.?\d*)%\s+of\s+~?([\d\.\w]+)\s+at\s+([\d\.\w\/]+)\s+ETA\s+([\d:]+)/);
           if (match) {
             job.progress = Math.min(99, Math.round(parseFloat(match[1])));
             job.size = match[2];
-            job.speed = match[3];
+            const sRaw = match[3];
+            const mibMatch = sRaw.match(/([\d\.]+)\s*([KMGT]?i?B\/s)/i);
+            if (mibMatch) {
+              let val = parseFloat(mibMatch[1]);
+              const unit = mibMatch[2].toUpperCase();
+              if (unit.startsWith('K')) val = val / 1024;
+              else if (unit.startsWith('G')) val = val * 1024;
+              const mbps = (val * 8).toFixed(0);
+              job.speed = `${val.toFixed(1)} MB/s (${mbps} Mbps) ⚡ Turbo`;
+            } else {
+              job.speed = sRaw;
+            }
             job.eta = match[4];
           }
         }
