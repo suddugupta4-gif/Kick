@@ -587,6 +587,49 @@ app.post('/api/detect', async (req, res) => {
         const livestream = channelData.livestream;
         const isLive = Boolean(livestream && livestream.is_live !== false);
 
+        // Fetch channel past livestreams (VODs) and clips for all channel queries
+        let vods = [];
+        let clips = [];
+
+        try {
+          const rawVods = await fetchKickJson(`https://kick.com/api/v2/channels/${slug}/videos`);
+          const vidsList = Array.isArray(rawVods) ? rawVods : (rawVods?.videos || []);
+          vods = vidsList.slice(0, 30).map(v => {
+            const durSec = v.duration ? Math.round(v.duration / 1000) : (v.duration_seconds || 0);
+            return {
+              id: v.video?.uuid || v.id || v.video_id,
+              channelSlug: slug,
+              title: v.session_title || v.title || `Livestream #${v.id}`,
+              duration: durSec,
+              durationFormatted: formatDuration(durSec),
+              thumbnail: v.thumbnail?.src || v.thumbnail?.url || v.thumbnail_url || '',
+              views: v.views || 0,
+              createdAt: v.created_at || '',
+              source: v.source || v.video?.source || ''
+            };
+          });
+        } catch (e) {
+          console.warn('Could not fetch channel VODs:', e.message);
+        }
+
+        try {
+          const rawClips = await fetchKickJson(`https://kick.com/api/v2/channels/${slug}/clips?sort=date&time=all&page=1`);
+          const clipsList = Array.isArray(rawClips) ? rawClips : (rawClips?.clips || []);
+          clips = clipsList.slice(0, 30).map(c => ({
+            id: c.id,
+            slug: c.slug || c.id,
+            title: c.title || 'Kick Clip',
+            duration: c.duration || 0,
+            durationFormatted: formatDuration(c.duration),
+            thumbnail: c.thumbnail_url || '',
+            views: c.views || 0,
+            createdAt: c.created_at || '',
+            clipUrl: c.clip_url || c.video_url || ''
+          }));
+        } catch (e) {
+          console.warn('Could not fetch channel Clips:', e.message);
+        }
+
         if (isLive) {
           const playbackUrl = livestream.playback_url || channelData.playback_url;
           if (!playbackUrl) {
@@ -601,6 +644,7 @@ app.post('/api/detect', async (req, res) => {
             isLive: true,
             slug,
             channel: channelData.user?.username || channelData.slug || slug,
+            profilePic: channelData.user?.profile_pic || '',
             title: livestream.session_title || `${channelData.user?.username || slug} Live Stream`,
             category: livestream.categories?.[0]?.name || livestream.category?.name || '',
             viewers: livestream.viewer_count || 0,
@@ -608,52 +652,11 @@ app.post('/api/detect', async (req, res) => {
             thumbnail: livestream.thumbnail?.url || channelData.user?.profile_pic || '',
             masterUrl: playbackUrl,
             variants,
+            vods,
+            clips,
             url: `https://kick.com/${slug}`
           });
         } else {
-          // Channel is OFFLINE -> Fetch last 12 VODs + last 12 Clips
-          let vods = [];
-          let clips = [];
-
-          try {
-            const rawVods = await fetchKickJson(`https://kick.com/api/v2/channels/${slug}/videos`);
-            const vidsList = Array.isArray(rawVods) ? rawVods : (rawVods?.videos || []);
-            vods = vidsList.slice(0, 12).map(v => {
-              const durSec = v.duration ? Math.round(v.duration / 1000) : (v.duration_seconds || 0);
-              return {
-                id: v.video?.uuid || v.id || v.video_id,
-                channelSlug: slug,
-                title: v.session_title || v.title || `VOD #${v.id}`,
-                duration: durSec,
-                durationFormatted: formatDuration(durSec),
-                thumbnail: v.thumbnail?.src || v.thumbnail?.url || v.thumbnail_url || '',
-                views: v.views || 0,
-                createdAt: v.created_at || '',
-                source: v.source || v.video?.source || ''
-              };
-            });
-          } catch (e) {
-            console.warn('Could not fetch channel VODs:', e.message);
-          }
-
-          try {
-            const rawClips = await fetchKickJson(`https://kick.com/api/v2/channels/${slug}/clips?sort=date&time=all&page=1`);
-            const clipsList = Array.isArray(rawClips) ? rawClips : (rawClips?.clips || []);
-            clips = clipsList.slice(0, 12).map(c => ({
-              id: c.id,
-              slug: c.slug || c.id,
-              title: c.title || 'Kick Clip',
-              duration: c.duration || 0,
-              durationFormatted: formatDuration(c.duration),
-              thumbnail: c.thumbnail_url || '',
-              views: c.views || 0,
-              createdAt: c.created_at || '',
-              clipUrl: c.clip_url || c.video_url || ''
-            }));
-          } catch (e) {
-            console.warn('Could not fetch channel Clips:', e.message);
-          }
-
           return res.json({
             platform: 'kick',
             type: 'offline_channel',
@@ -1375,11 +1378,6 @@ app.get('/api/hls-segments', async (req, res) => {
       return res.status(500).json({ error: 'Could not fetch stream playlist' });
     }
 
-    let isLive = false;
-    if (text.includes('#EXT-X-PLAYLIST-TYPE:EVENT') || (!text.includes('#EXT-X-ENDLIST') && text.includes('#EXTINF:'))) {
-      isLive = !text.includes('#EXT-X-ENDLIST');
-    }
-
     // Handle master playlist
     if (text.includes('#EXT-X-STREAM-INF:')) {
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -1408,6 +1406,7 @@ app.get('/api/hls-segments', async (req, res) => {
       }
     }
 
+    const isLive = !text.includes('#EXT-X-ENDLIST');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     const playlistBase = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
     const segments = [];
@@ -1420,13 +1419,27 @@ app.get('/api/hls-segments', async (req, res) => {
         if (durMatch) totalDuration += parseFloat(durMatch[1]);
         continue;
       }
+      if (line.startsWith('#EXT-X-PREFETCH:')) {
+        let pUrl = line.replace('#EXT-X-PREFETCH:', '').trim();
+        if (pUrl) {
+          if (!pUrl.startsWith('http://') && !pUrl.startsWith('https://')) {
+            pUrl = new URL(pUrl, playlistBase).toString();
+          }
+          if (!segments.includes(pUrl)) {
+            segments.push(pUrl);
+          }
+        }
+        continue;
+      }
       if (line.startsWith('#') || !line) continue;
 
       let segUrl = line;
       if (!segUrl.startsWith('http://') && !segUrl.startsWith('https://')) {
         segUrl = new URL(segUrl, playlistBase).toString();
       }
-      segments.push(segUrl);
+      if (!segments.includes(segUrl)) {
+        segments.push(segUrl);
+      }
     }
 
     return res.json({

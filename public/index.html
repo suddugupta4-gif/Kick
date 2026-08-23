@@ -1458,7 +1458,7 @@
         <div class="profile-info">
           <div class="profile-name">
             <span id="offline-channel-name">Streamer</span>
-            <span class="badge-pill" style="background: rgba(255, 255, 255, 0.08); color: var(--text-muted); border: 1px solid var(--border-subtle);">
+            <span class="badge-pill" id="offline-channel-status" style="background: rgba(255, 255, 255, 0.08); color: var(--text-muted); border: 1px solid var(--border-subtle);">
               Offline
             </span>
           </div>
@@ -1468,10 +1468,10 @@
 
       <div class="offline-tab-row">
         <button type="button" class="offline-tab-btn active" id="tab-offline-vods" data-channel-tab="vods">
-          Recent VODs (<span id="vod-count">0</span>)
+          📼 Past Livestreams (<span id="vod-count">0</span>)
         </button>
         <button type="button" class="offline-tab-btn" id="tab-offline-clips" data-channel-tab="clips">
-          Top Clips (<span id="clip-count">0</span>)
+          🎬 Top Clips (<span id="clip-count">0</span>)
         </button>
       </div>
 
@@ -1762,6 +1762,7 @@
     function renderMediaResult(data) {
       // If channel is offline Kick channel
       if (data.type === 'offline_channel') {
+        resultCard.style.display = 'none';
         renderOfflineChannel(data);
         return;
       }
@@ -1852,6 +1853,13 @@
 
       // Configure Download Button Label
       updateDownloadButtonState();
+
+      // If channel has past livestreams / VODs or clips, render them below
+      if (data.vods && data.vods.length > 0 || data.clips && data.clips.length > 0) {
+        renderOfflineChannel(data, true);
+      } else {
+        offlineView.style.display = 'none';
+      }
 
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
@@ -2037,28 +2045,29 @@
       } catch (e) {}
 
       const downloadSegment = async (url) => {
-        let attempts = 3;
-        while (attempts > 0 && !signal.aborted && !isStopping) {
-          try {
-            const resp = await fetch(url, { signal });
-            if (resp.ok) {
-              const ab = await resp.arrayBuffer();
-              return new Uint8Array(ab);
-            }
-          } catch (e) {
-            attempts--;
-            if (attempts === 0) {
-              try {
-                const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
-                if (proxyResp.ok) {
-                  const ab = await proxyResp.arrayBuffer();
-                  return new Uint8Array(ab);
-                }
-              } catch (pe) {}
-            }
-            await new Promise(r => setTimeout(r, 200));
+        if (signal.aborted || isStopping) return null;
+
+        // Try direct CDN fetch first (fastest, full bandwidth)
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const resp = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (resp.ok) {
+            const ab = await resp.arrayBuffer();
+            return new Uint8Array(ab);
           }
-        }
+        } catch (e) {}
+
+        // Fallback to proxy segment in case of CORS or network filters
+        try {
+          const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+          if (proxyResp.ok) {
+            const ab = await proxyResp.arrayBuffer();
+            return new Uint8Array(ab);
+          }
+        } catch (pe) {}
+
         return null;
       };
 
@@ -2070,57 +2079,26 @@
           const data = await res.json();
           const segments = data.segments || [];
 
-          for (const segUrl of segments) {
-            if (signal.aborted || isStopping) break;
-            if (!seenSegmentUrls.has(segUrl)) {
-              seenSegmentUrls.add(segUrl);
-              const buf = await downloadSegment(segUrl);
+          const newSegments = segments.filter(s => !seenSegmentUrls.has(s));
+          for (const s of newSegments) seenSegmentUrls.add(s);
+
+          if (newSegments.length > 0) {
+            const downloaded = await Promise.all(newSegments.map(url => downloadSegment(url)));
+            for (const buf of downloaded) {
               if (buf && buf.byteLength > 0) {
                 recordedChunks.push(buf);
                 totalBytes += buf.byteLength;
                 totalSegmentsCaptured++;
               }
             }
-          }
 
-          if (data.isLive === false && segments.length > 0 && !isStopping) {
-            finalizeRecording('Stream ended by broadcaster');
+            metricSize.textContent = formatBytesClient(totalBytes);
+            const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+            const durStr = formatDurationClient(elapsedSec);
+            progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments • ${durStr} • ${formatBytesClient(totalBytes)})`;
           }
         } catch (e) {}
       };
-
-      // Initial capture
-      await fetchLivePlaylist();
-
-      // Poll every 1.5 seconds for new live broadcast chunks
-      const liveInterval = setInterval(async () => {
-        if (signal.aborted || isStopping) {
-          clearInterval(liveInterval);
-          return;
-        }
-
-        await fetchLivePlaylist();
-
-        const now = Date.now();
-        const elapsedSec = Math.floor((now - startTime) / 1000);
-        const durStr = formatDurationClient(elapsedSec);
-
-        metricEta.textContent = durStr;
-        metricSize.textContent = formatBytesClient(totalBytes);
-        progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments &bull; ${durStr})`;
-
-        const speedElapsed = (now - lastSpeedTime) / 1000;
-        if (speedElapsed >= 1) {
-          const speedBps = (totalBytes - lastBytes) / speedElapsed;
-          metricSpeed.textContent = `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`;
-          lastBytes = totalBytes;
-          lastSpeedTime = now;
-        }
-
-        if (!isStopping) {
-          btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
-        }
-      }, 1500);
 
       const finalizeRecording = async (reason) => {
         if (isStopping) return;
@@ -2171,7 +2149,7 @@
           speed: 'Done'
         };
 
-        progressStatusLabel.textContent = `✅ Live Recording Saved! (${finalDur})`;
+        progressStatusLabel.textContent = `✅ Live Recording Saved! (${finalDur} • ${formatBytesClient(totalBytes)})`;
         metricStatus.textContent = 'SAVED';
         metricEta.textContent = finalDur;
         metricSize.textContent = formatBytesClient(totalBytes);
@@ -2182,6 +2160,39 @@
       };
 
       stopLiveRecordingFn = () => finalizeRecording('Stopped by user');
+
+      // Initial capture
+      await fetchLivePlaylist();
+
+      // Poll every 1.5 seconds for new live broadcast chunks
+      const liveInterval = setInterval(async () => {
+        if (signal.aborted || isStopping) {
+          clearInterval(liveInterval);
+          return;
+        }
+
+        await fetchLivePlaylist();
+
+        const now = Date.now();
+        const elapsedSec = Math.floor((now - startTime) / 1000);
+        const durStr = formatDurationClient(elapsedSec);
+
+        metricEta.textContent = durStr;
+        metricSize.textContent = formatBytesClient(totalBytes);
+        progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments • ${durStr} • ${formatBytesClient(totalBytes)})`;
+
+        const speedElapsed = (now - lastSpeedTime) / 1000;
+        if (speedElapsed >= 1) {
+          const speedBps = (totalBytes - lastBytes) / speedElapsed;
+          metricSpeed.textContent = speedBps > 0 ? `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s` : 'Recording...';
+          lastBytes = totalBytes;
+          lastSpeedTime = now;
+        }
+
+        if (!isStopping) {
+          btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
+        }
+      }, 1500);
     }
 
     // In-Browser High-Speed Stream Downloader for VODs (Bypasses serverless timeouts, runs at full client bandwidth)
@@ -2225,9 +2236,10 @@
         let lastBytes = 0;
         let lastTime = Date.now();
         const startTime = Date.now();
+        let directCdnWorks = null;
 
         const chunks = [];
-        const concurrency = 12; // 12 parallel threads for maximum network throughput
+        const concurrency = 10; // 10 parallel workers
         let nextIndex = 0;
         const downloadedMap = new Map();
         let nextToWrite = 0;
@@ -2243,41 +2255,41 @@
           }
         };
 
+        const downloadSingleSegment = async (url) => {
+          if (directCdnWorks !== false) {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 2500);
+              const resp = await fetch(url, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (resp.ok) {
+                directCdnWorks = true;
+                const ab = await resp.arrayBuffer();
+                return new Uint8Array(ab);
+              }
+            } catch (e) {
+              directCdnWorks = false;
+            }
+          }
+
+          // Fallback to proxy segment in case of CORS or network filters
+          try {
+            const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+            if (proxyResp.ok) {
+              const ab = await proxyResp.arrayBuffer();
+              return new Uint8Array(ab);
+            }
+          } catch (pe) {}
+
+          return null;
+        };
+
         const worker = async () => {
           while (nextIndex < totalSegments && !signal.aborted) {
             const idx = nextIndex++;
             const url = segments[idx];
 
-            let attempts = 4;
-            let buf = null;
-
-            while (attempts > 0 && !signal.aborted) {
-              try {
-                // Direct CDN fetch first (open CORS on AWS IVS / CloudFront)
-                const resp = await fetch(url, { signal });
-                if (resp.ok) {
-                  const ab = await resp.arrayBuffer();
-                  buf = new Uint8Array(ab);
-                  break;
-                } else {
-                  throw new Error(`HTTP ${resp.status}`);
-                }
-              } catch (e) {
-                attempts--;
-                if (attempts === 0) {
-                  // Fallback to proxy segment in case of local network filter
-                  try {
-                    const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
-                    if (proxyResp.ok) {
-                      const ab = await proxyResp.arrayBuffer();
-                      buf = new Uint8Array(ab);
-                      break;
-                    }
-                  } catch (pe) {}
-                }
-                await new Promise(r => setTimeout(r, 200));
-              }
-            }
+            const buf = await downloadSingleSegment(url);
 
             if (signal.aborted) return;
 
@@ -2298,7 +2310,7 @@
             progressStatusLabel.textContent = `Downloading (${completedSegments}/${totalSegments} segments - ${pct}%)`;
 
             const elapsedSec = (now - lastTime) / 1000;
-            if (elapsedSec >= 0.4 || completedSegments === totalSegments) {
+            if (elapsedSec >= 0.3 || completedSegments === totalSegments) {
               const speedBps = (totalBytes - lastBytes) / (elapsedSec || 1);
               const speedMb = (speedBps / (1024 * 1024)).toFixed(1);
               metricSpeed.textContent = `${speedMb} MB/s`;
@@ -2711,15 +2723,30 @@
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Offline Channel Browser
+    // Channel Explorer & Past Livestreams Browser
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    function renderOfflineChannel(data) {
+    function renderOfflineChannel(data, isLive = false) {
       channelOfflineData = data;
       offlineView.style.display = 'block';
 
-      offlineAvatar.src = data.profilePic || 'https://kick.com/favicon.ico';
+      offlineAvatar.src = data.profilePic || data.thumbnail || 'https://kick.com/favicon.ico';
       offlineChannelName.textContent = data.channel || data.slug;
-      offlineBio.textContent = data.bio || (data.followersCount ? `${data.followersCount.toLocaleString()} Followers` : 'Kick Streamer');
+      offlineBio.textContent = data.bio || (data.followersCount ? `${data.followersCount.toLocaleString()} Followers` : (isLive ? 'Active Livestreamer' : 'Kick Streamer'));
+
+      const statusPill = document.getElementById('offline-channel-status');
+      if (statusPill) {
+        if (isLive || data.isLive) {
+          statusPill.innerHTML = '<span class="live-dot" style="margin-right:4px;"></span> Streaming Live';
+          statusPill.style.background = 'rgba(255, 51, 51, 0.15)';
+          statusPill.style.borderColor = 'rgba(255, 51, 51, 0.4)';
+          statusPill.style.color = '#ff5555';
+        } else {
+          statusPill.textContent = 'Offline';
+          statusPill.style.background = 'rgba(255, 255, 255, 0.08)';
+          statusPill.style.borderColor = 'var(--border-subtle)';
+          statusPill.style.color = 'var(--text-muted)';
+        }
+      }
 
       vodCount.textContent = (data.vods || []).length;
       clipCount.textContent = (data.clips || []).length;
@@ -2729,7 +2756,9 @@
       tabOfflineClips.classList.remove('active');
 
       renderOfflineGridItems();
-      offlineView.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (!isLive) {
+        offlineView.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     tabOfflineVods.addEventListener('click', () => {
