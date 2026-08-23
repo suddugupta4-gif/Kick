@@ -1411,12 +1411,25 @@ app.get('/api/hls-segments', async (req, res) => {
     const playlistBase = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
     const segments = [];
     let totalDuration = 0;
+    let currentByteRange = null;
+    let currentDur = 0;
+    let lastOffset = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      if (line.startsWith('#EXT-X-BYTERANGE:')) {
+        const match = line.replace('#EXT-X-BYTERANGE:', '').trim().match(/^(\d+)(?:@(\d+))?$/);
+        if (match) {
+          const length = parseInt(match[1], 10);
+          const offset = match[2] !== undefined ? parseInt(match[2], 10) : lastOffset;
+          currentByteRange = { length, offset };
+          lastOffset = offset + length;
+        }
+        continue;
+      }
       if (line.startsWith('#EXTINF:')) {
         const durMatch = line.match(/#EXTINF:([\d.]+)/);
-        if (durMatch) totalDuration += parseFloat(durMatch[1]);
+        if (durMatch) currentDur = parseFloat(durMatch[1]);
         continue;
       }
       if (line.startsWith('#EXT-X-PREFETCH:')) {
@@ -1425,9 +1438,14 @@ app.get('/api/hls-segments', async (req, res) => {
           if (!pUrl.startsWith('http://') && !pUrl.startsWith('https://')) {
             pUrl = new URL(pUrl, playlistBase).toString();
           }
-          if (!segments.includes(pUrl)) {
-            segments.push(pUrl);
-          }
+          segments.push({
+            url: pUrl,
+            duration: currentDur || 2,
+            byteRange: currentByteRange
+          });
+          totalDuration += currentDur || 2;
+          currentByteRange = null;
+          currentDur = 0;
         }
         continue;
       }
@@ -1437,9 +1455,14 @@ app.get('/api/hls-segments', async (req, res) => {
       if (!segUrl.startsWith('http://') && !segUrl.startsWith('https://')) {
         segUrl = new URL(segUrl, playlistBase).toString();
       }
-      if (!segments.includes(segUrl)) {
-        segments.push(segUrl);
-      }
+      segments.push({
+        url: segUrl,
+        duration: currentDur,
+        byteRange: currentByteRange
+      });
+      totalDuration += currentDur;
+      currentByteRange = null;
+      currentDur = 0;
     }
 
     return res.json({
@@ -1456,28 +1479,46 @@ app.get('/api/hls-segments', async (req, res) => {
   }
 });
 
-// Proxy single segment with CORS in case of direct fetch failure
+// Proxy single segment with CORS and Range header support in case of direct fetch failure
 app.get('/api/proxy-segment', async (req, res) => {
   const segUrl = req.query.url;
   if (!segUrl) return res.status(400).send('Missing url');
 
   try {
+    const upstreamHeaders = {
+      'User-Agent': BROWSER_HEADERS['User-Agent'],
+      'Referer': 'https://kick.com/',
+      'Origin': 'https://kick.com'
+    };
+    if (req.headers.range) {
+      upstreamHeaders['Range'] = req.headers.range;
+    }
+
     const upstream = await axios.get(segUrl, {
       responseType: 'stream',
-      headers: {
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-        'Referer': 'https://kick.com/',
-        'Origin': 'https://kick.com'
-      },
-      timeout: 20000
+      headers: upstreamHeaders,
+      timeout: 25000,
+      validateStatus: (status) => status >= 200 && status < 400
     });
 
-    res.writeHead(200, {
-      'Content-Type': 'video/MP2T',
+    const headers = {
+      'Content-Type': upstream.headers['content-type'] || 'video/MP2T',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range, Origin, Content-Type, Accept',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
       'Cache-Control': 'public, max-age=86400'
-    });
+    };
+    if (upstream.headers['content-range']) {
+      headers['Content-Range'] = upstream.headers['content-range'];
+    }
+    if (upstream.headers['content-length']) {
+      headers['Content-Length'] = upstream.headers['content-length'];
+    }
+    if (upstream.headers['accept-ranges']) {
+      headers['Accept-Ranges'] = upstream.headers['accept-ranges'];
+    }
 
+    res.writeHead(upstream.status || 200, headers);
     upstream.data.pipe(res);
   } catch (e) {
     if (!res.headersSent) res.status(500).send(e.message);

@@ -2044,14 +2044,21 @@
         }
       } catch (e) {}
 
-      const downloadSegment = async (url) => {
+      const downloadSegment = async (item) => {
         if (signal.aborted || isStopping) return null;
+        const url = typeof item === 'string' ? item : item.url;
+        const byteRange = (typeof item === 'object' && item.byteRange) ? item.byteRange : null;
+
+        const headers = {};
+        if (byteRange && byteRange.length) {
+          headers['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
+        }
 
         // Try direct CDN fetch first (fastest, full bandwidth)
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 4000);
-          const resp = await fetch(url, { signal: controller.signal });
+          const resp = await fetch(url, { headers, signal: controller.signal });
           clearTimeout(timeoutId);
           if (resp.ok) {
             const ab = await resp.arrayBuffer();
@@ -2061,7 +2068,8 @@
 
         // Fallback to proxy segment in case of CORS or network filters
         try {
-          const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+          const proxyUrl = `/api/proxy-segment?url=${encodeURIComponent(url)}`;
+          const proxyResp = await fetch(proxyUrl, { headers, signal });
           if (proxyResp.ok) {
             const ab = await proxyResp.arrayBuffer();
             return new Uint8Array(ab);
@@ -2069,6 +2077,12 @@
         } catch (pe) {}
 
         return null;
+      };
+
+      const getSegmentKey = (item) => {
+        if (typeof item === 'string') return item;
+        if (item.byteRange) return `${item.url}@${item.byteRange.offset}_${item.byteRange.length}`;
+        return item.url;
       };
 
       const fetchLivePlaylist = async () => {
@@ -2079,11 +2093,11 @@
           const data = await res.json();
           const segments = data.segments || [];
 
-          const newSegments = segments.filter(s => !seenSegmentUrls.has(s));
-          for (const s of newSegments) seenSegmentUrls.add(s);
+          const newSegments = segments.filter(s => !seenSegmentUrls.has(getSegmentKey(s)));
+          for (const s of newSegments) seenSegmentUrls.add(getSegmentKey(s));
 
           if (newSegments.length > 0) {
-            const downloaded = await Promise.all(newSegments.map(url => downloadSegment(url)));
+            const downloaded = await Promise.all(newSegments.map(item => downloadSegment(item)));
             for (const buf of downloaded) {
               if (buf && buf.byteLength > 0) {
                 recordedChunks.push(buf);
@@ -2255,12 +2269,20 @@
           }
         };
 
-        const downloadSingleSegment = async (url) => {
+        const downloadSingleSegment = async (item) => {
+          const url = typeof item === 'string' ? item : item.url;
+          const byteRange = (typeof item === 'object' && item.byteRange) ? item.byteRange : null;
+
+          const headers = {};
+          if (byteRange && byteRange.length) {
+            headers['Range'] = `bytes=${byteRange.offset}-${byteRange.offset + byteRange.length - 1}`;
+          }
+
           if (directCdnWorks !== false) {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 2500);
-              const resp = await fetch(url, { signal: controller.signal });
+              const timeoutId = setTimeout(() => controller.abort(), 4000);
+              const resp = await fetch(url, { headers, signal: controller.signal });
               clearTimeout(timeoutId);
               if (resp.ok) {
                 directCdnWorks = true;
@@ -2274,7 +2296,8 @@
 
           // Fallback to proxy segment in case of CORS or network filters
           try {
-            const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+            const proxyUrl = `/api/proxy-segment?url=${encodeURIComponent(url)}`;
+            const proxyResp = await fetch(proxyUrl, { headers, signal });
             if (proxyResp.ok) {
               const ab = await proxyResp.arrayBuffer();
               return new Uint8Array(ab);
@@ -2287,9 +2310,9 @@
         const worker = async () => {
           while (nextIndex < totalSegments && !signal.aborted) {
             const idx = nextIndex++;
-            const url = segments[idx];
+            const item = segments[idx];
 
-            const buf = await downloadSingleSegment(url);
+            const buf = await downloadSingleSegment(item);
 
             if (signal.aborted) return;
 
@@ -2395,27 +2418,13 @@
         return;
       }
 
-      // Instant high-speed direct CDN download for Kick clips (bypasses serverless timeouts)
-      if (currentMedia.platform === 'kick' && currentMedia.type === 'clip' && currentMedia.clipUrl) {
-        const safeTitle = (currentMedia.title || 'kick_clip').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
-        const a = document.createElement('a');
-        a.href = currentMedia.clipUrl;
-        a.download = `${safeTitle}.mp4`;
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        showToast('🚀 Downloading Kick Clip directly from CDN...', 'success');
-        return;
-      }
-
       clearError();
       resetProgress();
 
       try {
         if (currentMedia.platform === 'kick') {
-          const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl;
-          const qualityName = selectedQuality ? selectedQuality.quality : 'Source';
+          const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : (currentMedia.clipUrl || currentMedia.masterUrl);
+          const qualityName = selectedQuality ? selectedQuality.quality : (currentMedia.type === 'clip' ? 'Clip' : 'Source');
           
           if (currentMedia.isLive) {
             // Start continuous live stream recorder
@@ -2423,7 +2432,7 @@
             return;
           }
 
-          // Use in-browser Turbo HLS Downloader for VODs
+          // Use in-browser Turbo HLS Downloader for VODs & Clips
           startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
           return;
         }
