@@ -1952,6 +1952,8 @@
     // Download Action Handler & Turbo HLS Engine
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     let clientDownloadAbortController = null;
+    let isLiveRecordingActive = false;
+    let stopLiveRecordingFn = null;
 
     function formatBytesClient(bytes) {
       if (!bytes || bytes === 0) return '0 B';
@@ -1962,17 +1964,227 @@
     }
 
     function formatDurationClient(seconds) {
-      if (!seconds || seconds <= 0 || isNaN(seconds)) return '--:--';
+      if (!seconds || seconds <= 0 || isNaN(seconds)) return '00:00';
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
       const s = Math.floor(seconds % 60);
       if (h > 0) {
         return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
       }
-      return `${m}:${s.toString().padStart(2, '0')}`;
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 
-    // In-Browser High-Speed Stream Downloader (Bypasses serverless timeouts, runs at full client bandwidth)
+    // In-Browser Live Stream Recorder (Continuously records live stream until stopped, zero timeout)
+    async function startClientLiveRecording(streamUrl, mediaTitle, resolution) {
+      if (isLiveRecordingActive && stopLiveRecordingFn) {
+        stopLiveRecordingFn();
+        return;
+      }
+
+      isLiveRecordingActive = true;
+      clientDownloadAbortController = new AbortController();
+      const signal = clientDownloadAbortController.signal;
+
+      clearError();
+      resetProgress();
+      isLiveRecordingActive = true;
+      progressBox.style.display = 'block';
+
+      // Update button to active recording state
+      btnStartDownload.disabled = false;
+      btnStartDownload.style.background = 'linear-gradient(135deg, #ff4757 0%, #ff6b81 100%)';
+      btnStartDownload.style.boxShadow = '0 0 20px rgba(255, 71, 87, 0.45)';
+      btnStartDownload.style.color = '#fff';
+      btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${resolution || '1080p'})`;
+
+      btnStopRecording.style.display = 'inline-flex';
+      btnStopRecording.disabled = false;
+      btnStopRecording.textContent = '🛑 Stop & Finalize MP4';
+
+      metricStatus.textContent = 'RECORDING';
+      metricStatus.style.color = '#ff4757';
+      progressStatusLabel.textContent = '🔴 Connecting to Live Stream...';
+      progressBarFill.style.width = '100%';
+      progressBarFill.style.background = 'linear-gradient(90deg, #ff4757, #ff6b81)';
+      progressPercentageLabel.textContent = 'LIVE';
+
+      const cleanTitle = (mediaTitle || 'kick_live').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
+      const resTag = resolution ? `_${resolution.replace(/[^\w]/g, '')}` : '';
+      const filename = `${cleanTitle}${resTag}_LiveRec.mp4`;
+
+      showToast('🔴 Live recording started! Tap "Stop & Save" when done.', 'info');
+
+      const recordedChunks = [];
+      const seenSegmentUrls = new Set();
+      let totalBytes = 0;
+      let totalSegmentsCaptured = 0;
+      const startTime = Date.now();
+      let lastBytes = 0;
+      let lastSpeedTime = Date.now();
+      let isStopping = false;
+
+      let targetPlaylistUrl = streamUrl;
+
+      // Resolve master to variant if needed
+      try {
+        const initRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`);
+        if (initRes.ok) {
+          const initData = await initRes.json();
+          if (initData.playlistUrl) {
+            targetPlaylistUrl = initData.playlistUrl;
+          }
+        }
+      } catch (e) {}
+
+      const downloadSegment = async (url) => {
+        let attempts = 3;
+        while (attempts > 0 && !signal.aborted && !isStopping) {
+          try {
+            const resp = await fetch(url, { signal });
+            if (resp.ok) {
+              const ab = await resp.arrayBuffer();
+              return new Uint8Array(ab);
+            }
+          } catch (e) {
+            attempts--;
+            if (attempts === 0) {
+              try {
+                const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+                if (proxyResp.ok) {
+                  const ab = await proxyResp.arrayBuffer();
+                  return new Uint8Array(ab);
+                }
+              } catch (pe) {}
+            }
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+        return null;
+      };
+
+      const fetchLivePlaylist = async () => {
+        if (signal.aborted || isStopping) return;
+        try {
+          const res = await fetch(`/api/hls-segments?url=${encodeURIComponent(targetPlaylistUrl)}`, { signal });
+          if (!res.ok) return;
+          const data = await res.json();
+          const segments = data.segments || [];
+
+          for (const segUrl of segments) {
+            if (signal.aborted || isStopping) break;
+            if (!seenSegmentUrls.has(segUrl)) {
+              seenSegmentUrls.add(segUrl);
+              const buf = await downloadSegment(segUrl);
+              if (buf && buf.byteLength > 0) {
+                recordedChunks.push(buf);
+                totalBytes += buf.byteLength;
+                totalSegmentsCaptured++;
+              }
+            }
+          }
+
+          if (data.isLive === false && segments.length > 0 && !isStopping) {
+            finalizeRecording('Stream ended by broadcaster');
+          }
+        } catch (e) {}
+      };
+
+      // Initial capture
+      await fetchLivePlaylist();
+
+      // Poll every 1.5 seconds for new live broadcast chunks
+      const liveInterval = setInterval(async () => {
+        if (signal.aborted || isStopping) {
+          clearInterval(liveInterval);
+          return;
+        }
+
+        await fetchLivePlaylist();
+
+        const now = Date.now();
+        const elapsedSec = Math.floor((now - startTime) / 1000);
+        const durStr = formatDurationClient(elapsedSec);
+
+        metricEta.textContent = durStr;
+        metricSize.textContent = formatBytesClient(totalBytes);
+        progressStatusLabel.textContent = `🔴 Live Recording (${totalSegmentsCaptured} segments &bull; ${durStr})`;
+
+        const speedElapsed = (now - lastSpeedTime) / 1000;
+        if (speedElapsed >= 1) {
+          const speedBps = (totalBytes - lastBytes) / speedElapsed;
+          metricSpeed.textContent = `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`;
+          lastBytes = totalBytes;
+          lastSpeedTime = now;
+        }
+
+        if (!isStopping) {
+          btnDownloadLabel.textContent = `🛑 Stop & Save Live Recording (${durStr} • ${formatBytesClient(totalBytes)})`;
+        }
+      }, 1500);
+
+      const finalizeRecording = async (reason) => {
+        if (isStopping) return;
+        isStopping = true;
+        clearInterval(liveInterval);
+        isLiveRecordingActive = false;
+        stopLiveRecordingFn = null;
+
+        metricStatus.textContent = 'FINALIZING';
+        metricStatus.style.color = 'var(--kick-green)';
+        progressStatusLabel.textContent = 'Finalizing and packaging live recording...';
+        btnStartDownload.disabled = true;
+        btnStopRecording.style.display = 'none';
+
+        // Restore button styling
+        btnStartDownload.style.background = '';
+        btnStartDownload.style.boxShadow = '';
+        btnStartDownload.style.color = '';
+        updateDownloadButtonState();
+
+        if (recordedChunks.length === 0) {
+          showError('Live Recording', 'No video data captured from the live stream.');
+          resetProgress();
+          btnStartDownload.disabled = false;
+          return;
+        }
+
+        const fileBlob = new Blob(recordedChunks, { type: 'video/mp4' });
+        if (cachedBlobUrl) {
+          window.URL.revokeObjectURL(cachedBlobUrl);
+        }
+        cachedBlobUrl = window.URL.createObjectURL(fileBlob);
+
+        const autoLink = document.createElement('a');
+        autoLink.style.display = 'none';
+        autoLink.href = cachedBlobUrl;
+        autoLink.download = filename;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        setTimeout(() => autoLink.remove(), 2000);
+
+        const finalDur = formatDurationClient(Math.floor((Date.now() - startTime) / 1000));
+        lastFinishedJob = {
+          id: 'client_' + Date.now(),
+          filename: filename,
+          status: 'completed',
+          size: formatBytesClient(totalBytes),
+          speed: 'Done'
+        };
+
+        progressStatusLabel.textContent = `✅ Live Recording Saved! (${finalDur})`;
+        metricStatus.textContent = 'SAVED';
+        metricEta.textContent = finalDur;
+        metricSize.textContent = formatBytesClient(totalBytes);
+        completedActions.style.display = 'block';
+        btnStartDownload.disabled = false;
+
+        showToast(`🎉 Live recording saved: ${filename} (${finalDur})`, 'success');
+      };
+
+      stopLiveRecordingFn = () => finalizeRecording('Stopped by user');
+    }
+
+    // In-Browser High-Speed Stream Downloader for VODs (Bypasses serverless timeouts, runs at full client bandwidth)
     async function startClientHlsDownload(streamUrl, mediaTitle, resolution) {
       clientDownloadAbortController = new AbortController();
       const signal = clientDownloadAbortController.signal;
@@ -2165,6 +2377,12 @@
     btnStartDownload.addEventListener('click', async () => {
       if (!currentMedia) return;
 
+      // If active client live recording, clicking button stops & saves
+      if (isLiveRecordingActive && stopLiveRecordingFn) {
+        stopLiveRecordingFn();
+        return;
+      }
+
       // Instant high-speed direct CDN download for Kick clips (bypasses serverless timeouts)
       if (currentMedia.platform === 'kick' && currentMedia.type === 'clip' && currentMedia.clipUrl) {
         const safeTitle = (currentMedia.title || 'kick_clip').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 80);
@@ -2184,11 +2402,16 @@
 
       try {
         if (currentMedia.platform === 'kick') {
-          // For Kick VODs and Streams:
           const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl;
           const qualityName = selectedQuality ? selectedQuality.quality : 'Source';
           
-          // Use in-browser Turbo HLS Downloader (immune to serverless timeouts and mid-way pauses)
+          if (currentMedia.isLive) {
+            // Start continuous live stream recorder
+            startClientLiveRecording(streamUrl, currentMedia.title, qualityName);
+            return;
+          }
+
+          // Use in-browser Turbo HLS Downloader for VODs
           startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
           return;
         }
@@ -2256,6 +2479,11 @@
 
     // Stop Live Recording
     btnStopRecording.addEventListener('click', async () => {
+      if (isLiveRecordingActive && stopLiveRecordingFn) {
+        stopLiveRecordingFn();
+        return;
+      }
+
       if (!activeJobId) return;
 
       btnStopRecording.disabled = true;
@@ -2466,12 +2694,20 @@
         clientDownloadAbortController.abort();
         clientDownloadAbortController = null;
       }
+      isLiveRecordingActive = false;
+      stopLiveRecordingFn = null;
       activeJobId = null;
       progressBox.style.display = 'none';
       completedActions.style.display = 'none';
       progressBarFill.style.width = '0%';
+      progressBarFill.style.background = '';
       btnStopRecording.style.display = 'none';
       btnStartDownload.disabled = false;
+      btnStartDownload.style.background = '';
+      btnStartDownload.style.boxShadow = '';
+      btnStartDownload.style.color = '';
+      metricStatus.style.color = '';
+      updateDownloadButtonState();
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
