@@ -1360,6 +1360,117 @@ app.get('/api/file/:jobId', (req, res) => {
   }
 });
 
+// Return array of direct CDN segments for ultra-fast, zero-timeout client-side stream downloading
+app.get('/api/hls-segments', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) {
+    return res.status(400).json({ error: 'Missing stream URL' });
+  }
+
+  try {
+    let playlistUrl = targetUrl;
+    let text = await fetchKickText(playlistUrl);
+
+    if (!text || typeof text !== 'string') {
+      return res.status(500).json({ error: 'Could not fetch stream playlist' });
+    }
+
+    let isLive = false;
+    if (text.includes('#EXT-X-PLAYLIST-TYPE:EVENT') || (!text.includes('#EXT-X-ENDLIST') && text.includes('#EXTINF:'))) {
+      isLive = !text.includes('#EXT-X-ENDLIST');
+    }
+
+    // Handle master playlist
+    if (text.includes('#EXT-X-STREAM-INF:')) {
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+      let bestVariant = null;
+      let maxBw = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+          const next = lines[i + 1];
+          if (next && !next.startsWith('#')) {
+            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/i);
+            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            const fullUrl = next.startsWith('http') ? next : new URL(next, baseUrl).toString();
+            if (bw > maxBw || !bestVariant) {
+              maxBw = bw;
+              bestVariant = fullUrl;
+            }
+          }
+        }
+      }
+
+      if (bestVariant) {
+        playlistUrl = bestVariant;
+        text = await fetchKickText(playlistUrl);
+      }
+    }
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const playlistBase = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+    const segments = [];
+    let totalDuration = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('#EXTINF:')) {
+        const durMatch = line.match(/#EXTINF:([\d.]+)/);
+        if (durMatch) totalDuration += parseFloat(durMatch[1]);
+        continue;
+      }
+      if (line.startsWith('#') || !line) continue;
+
+      let segUrl = line;
+      if (!segUrl.startsWith('http://') && !segUrl.startsWith('https://')) {
+        segUrl = new URL(segUrl, playlistBase).toString();
+      }
+      segments.push(segUrl);
+    }
+
+    return res.json({
+      success: true,
+      playlistUrl,
+      isLive,
+      totalDuration: Math.round(totalDuration),
+      totalSegments: segments.length,
+      segments
+    });
+  } catch (err) {
+    console.error('hls-segments error:', err.message);
+    return res.status(500).json({ error: err.message || 'Failed to parse stream segments' });
+  }
+});
+
+// Proxy single segment with CORS in case of direct fetch failure
+app.get('/api/proxy-segment', async (req, res) => {
+  const segUrl = req.query.url;
+  if (!segUrl) return res.status(400).send('Missing url');
+
+  try {
+    const upstream = await axios.get(segUrl, {
+      responseType: 'stream',
+      headers: {
+        'User-Agent': BROWSER_HEADERS['User-Agent'],
+        'Referer': 'https://kick.com/',
+        'Origin': 'https://kick.com'
+      },
+      timeout: 20000
+    });
+
+    res.writeHead(200, {
+      'Content-Type': 'video/MP2T',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400'
+    });
+
+    upstream.data.pipe(res);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).send(e.message);
+  }
+});
+
 // Direct HLS streaming download endpoint (100% compatible with Vercel serverless, Render, VPS, and Docker)
 app.get('/api/stream-hls', async (req, res) => {
   const targetUrl = req.query.url;

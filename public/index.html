@@ -1401,8 +1401,13 @@
             <span class="spinner spinner-light" id="progress-spinner"></span>
             <span id="progress-status-label">Downloading...</span>
           </div>
-          <div id="progress-percentage-label" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: var(--kick-green);">
-            0%
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div id="progress-percentage-label" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: var(--kick-green);">
+              0%
+            </div>
+            <button type="button" id="btn-cancel-download" style="background: rgba(255, 51, 51, 0.15); border: 1px solid rgba(255, 51, 51, 0.35); color: #ff6b6b; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+              ✕ Cancel
+            </button>
           </div>
         </div>
 
@@ -1944,8 +1949,219 @@
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Download Action Handler
+    // Download Action Handler & Turbo HLS Engine
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    let clientDownloadAbortController = null;
+
+    function formatBytesClient(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function formatDurationClient(seconds) {
+      if (!seconds || seconds <= 0 || isNaN(seconds)) return '--:--';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      if (h > 0) {
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+      }
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    // In-Browser High-Speed Stream Downloader (Bypasses serverless timeouts, runs at full client bandwidth)
+    async function startClientHlsDownload(streamUrl, mediaTitle, resolution) {
+      clientDownloadAbortController = new AbortController();
+      const signal = clientDownloadAbortController.signal;
+
+      btnStartDownload.disabled = true;
+      clearError();
+      resetProgress();
+      progressBox.style.display = 'block';
+      metricStatus.textContent = 'CONNECTING';
+      progressStatusLabel.textContent = 'Fetching stream playlist...';
+      progressBarFill.style.width = '2%';
+      progressPercentageLabel.textContent = '0%';
+
+      try {
+        const segRes = await fetch(`/api/hls-segments?url=${encodeURIComponent(streamUrl)}`);
+        if (!segRes.ok) {
+          const err = await segRes.json().catch(() => ({}));
+          throw new Error(err.error || `Server error ${segRes.status}`);
+        }
+        const segData = await segRes.json();
+        const segments = segData.segments || [];
+
+        if (segments.length === 0) {
+          throw new Error('No video segments found for this stream.');
+        }
+
+        const totalSegments = segments.length;
+        const cleanTitle = (mediaTitle || 'kick_stream').replace(/[^\w\s.-]/gi, '_').trim().slice(0, 60);
+        const resTag = resolution ? `_${resolution.replace(/[^\w]/g, '')}` : '';
+        const filename = `${cleanTitle}${resTag}.mp4`;
+
+        metricStatus.textContent = 'DOWNLOADING';
+        progressStatusLabel.textContent = `Downloading ${totalSegments} video segments...`;
+        showToast(`⚡ Turbo downloading ${totalSegments} segments directly...`, 'info');
+
+        let completedSegments = 0;
+        let totalBytes = 0;
+        let lastBytes = 0;
+        let lastTime = Date.now();
+        const startTime = Date.now();
+
+        const chunks = [];
+        const concurrency = 12; // 12 parallel threads for maximum network throughput
+        let nextIndex = 0;
+        const downloadedMap = new Map();
+        let nextToWrite = 0;
+
+        const flushMemory = () => {
+          while (downloadedMap.has(nextToWrite)) {
+            const buf = downloadedMap.get(nextToWrite);
+            downloadedMap.delete(nextToWrite);
+            if (buf && buf.byteLength > 0) {
+              chunks.push(buf);
+            }
+            nextToWrite++;
+          }
+        };
+
+        const worker = async () => {
+          while (nextIndex < totalSegments && !signal.aborted) {
+            const idx = nextIndex++;
+            const url = segments[idx];
+
+            let attempts = 4;
+            let buf = null;
+
+            while (attempts > 0 && !signal.aborted) {
+              try {
+                // Direct CDN fetch first (open CORS on AWS IVS / CloudFront)
+                const resp = await fetch(url, { signal });
+                if (resp.ok) {
+                  const ab = await resp.arrayBuffer();
+                  buf = new Uint8Array(ab);
+                  break;
+                } else {
+                  throw new Error(`HTTP ${resp.status}`);
+                }
+              } catch (e) {
+                attempts--;
+                if (attempts === 0) {
+                  // Fallback to proxy segment in case of local network filter
+                  try {
+                    const proxyResp = await fetch(`/api/proxy-segment?url=${encodeURIComponent(url)}`, { signal });
+                    if (proxyResp.ok) {
+                      const ab = await proxyResp.arrayBuffer();
+                      buf = new Uint8Array(ab);
+                      break;
+                    }
+                  } catch (pe) {}
+                }
+                await new Promise(r => setTimeout(r, 200));
+              }
+            }
+
+            if (signal.aborted) return;
+
+            if (buf) {
+              downloadedMap.set(idx, buf);
+              totalBytes += buf.byteLength;
+            } else {
+              downloadedMap.set(idx, new Uint8Array(0));
+            }
+
+            completedSegments++;
+            flushMemory();
+
+            const now = Date.now();
+            const pct = Math.min(99, Math.round((completedSegments / totalSegments) * 100));
+            progressPercentageLabel.textContent = `${pct}%`;
+            progressBarFill.style.width = `${pct}%`;
+            progressStatusLabel.textContent = `Downloading (${completedSegments}/${totalSegments} segments - ${pct}%)`;
+
+            const elapsedSec = (now - lastTime) / 1000;
+            if (elapsedSec >= 0.4 || completedSegments === totalSegments) {
+              const speedBps = (totalBytes - lastBytes) / (elapsedSec || 1);
+              const speedMb = (speedBps / (1024 * 1024)).toFixed(1);
+              metricSpeed.textContent = `${speedMb} MB/s`;
+              metricSize.textContent = formatBytesClient(totalBytes);
+
+              const remainingSegs = totalSegments - completedSegments;
+              const avgTimePerSeg = (now - startTime) / 1000 / completedSegments;
+              const remainingSec = Math.round(remainingSegs * avgTimePerSeg);
+              metricEta.textContent = formatDurationClient(remainingSec);
+
+              lastBytes = totalBytes;
+              lastTime = now;
+            }
+          }
+        };
+
+        const workers = [];
+        for (let w = 0; w < Math.min(concurrency, totalSegments); w++) {
+          workers.push(worker());
+        }
+
+        await Promise.all(workers);
+        flushMemory();
+
+        if (signal.aborted) {
+          showToast('Download cancelled', 'info');
+          btnStartDownload.disabled = false;
+          return;
+        }
+
+        // Package Blob and deliver
+        metricStatus.textContent = 'FINALIZING';
+        progressStatusLabel.textContent = 'Finalizing MP4 video file...';
+        progressPercentageLabel.textContent = '100%';
+        progressBarFill.style.width = '100%';
+
+        const fileBlob = new Blob(chunks, { type: 'video/mp4' });
+        if (cachedBlobUrl) {
+          window.URL.revokeObjectURL(cachedBlobUrl);
+        }
+        cachedBlobUrl = window.URL.createObjectURL(fileBlob);
+
+        const autoLink = document.createElement('a');
+        autoLink.style.display = 'none';
+        autoLink.href = cachedBlobUrl;
+        autoLink.download = filename;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        setTimeout(() => autoLink.remove(), 2000);
+
+        lastFinishedJob = {
+          id: 'client_' + Date.now(),
+          filename: filename,
+          status: 'completed',
+          size: formatBytesClient(totalBytes),
+          speed: metricSpeed.textContent
+        };
+
+        progressStatusLabel.textContent = '✅ Download Completed!';
+        metricStatus.textContent = 'READY';
+        metricEta.textContent = '00:00';
+        metricSize.textContent = formatBytesClient(totalBytes);
+        completedActions.style.display = 'block';
+        btnStartDownload.disabled = false;
+
+        showToast(`🎉 Download complete: ${filename}`, 'success');
+
+      } catch (err) {
+        if (signal.aborted) return;
+        console.error('Client download error:', err);
+        showError('Download Error', err.message);
+        btnStartDownload.disabled = false;
+      }
+    }
+
     btnStartDownload.addEventListener('click', async () => {
       if (!currentMedia) return;
 
@@ -1965,67 +2181,15 @@
 
       clearError();
       resetProgress();
-      progressBox.style.display = 'block';
 
       try {
         if (currentMedia.platform === 'kick') {
-          if (currentMedia.type === 'clip') {
-            const clipDlUrl = currentMedia.clipUrl;
-            const a = document.createElement('a');
-            a.href = clipDlUrl;
-            a.download = `${(currentMedia.title || 'kick_clip').replace(/[^a-zA-Z0-9_\-]/g, '_')}.mp4`;
-            a.target = '_blank';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            showToast('🚀 Downloading Kick Clip directly...', 'success');
-            btnStartDownload.disabled = false;
-            return;
-          }
-
           // For Kick VODs and Streams:
           const streamUrl = (selectedQuality && selectedQuality.url) ? selectedQuality.url : currentMedia.masterUrl;
-          const cleanTitle = (currentMedia.title || 'kick_stream').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 60);
-          const directStreamUrl = `/api/stream-hls?url=${encodeURIComponent(streamUrl)}&filename=${encodeURIComponent(cleanTitle + '.mp4')}`;
-
-          // Trigger native browser stream download (Works on Vercel, Cloud Run, Mobile, Desktop)
-          const dlLink = document.createElement('a');
-          dlLink.href = directStreamUrl;
-          dlLink.download = `${cleanTitle}.mp4`;
-          dlLink.target = '_blank';
-          document.body.appendChild(dlLink);
-          dlLink.click();
-          dlLink.remove();
-
-          progressStatusLabel.textContent = 'Streaming to Browser...';
-          progressPercentageLabel.textContent = 'READY';
-          progressBarFill.style.width = '100%';
-          metricStatus.textContent = 'STREAMING';
-          metricSpeed.textContent = 'HIGH SPEED';
-          metricSize.textContent = 'DYNAMIC';
-          metricEta.textContent = 'CHECK BROWSER';
-
-          showToast('📥 Download started in your browser / notification bar!', 'success');
-
-          // Also trigger background packaging job in parallel if running on a persistent server
-          fetch('/api/download/hls', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              url: streamUrl,
-              title: currentMedia.title,
-              isLive: currentMedia.isLive,
-              quality: selectedQuality ? selectedQuality.quality : 'best',
-              duration: currentMedia.duration || 0
-            })
-          }).then(res => res.json()).then(data => {
-            if (data && data.jobId) {
-              activeJobId = data.jobId;
-              startJobPolling(activeJobId);
-            }
-          }).catch(() => {});
-
-          btnStartDownload.disabled = false;
+          const qualityName = selectedQuality ? selectedQuality.quality : 'Source';
+          
+          // Use in-browser Turbo HLS Downloader (immune to serverless timeouts and mid-way pauses)
+          startClientHlsDownload(streamUrl, currentMedia.title, qualityName);
           return;
         }
 
@@ -2043,6 +2207,9 @@
             title: currentMedia.title
           };
         }
+
+        progressBox.style.display = 'block';
+        btnStartDownload.disabled = true;
 
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -2174,7 +2341,21 @@
     async function triggerBlobDownload(job) {
       if (!job) return;
       const btnSaveLabel = document.getElementById('btn-save-file-label');
-      const originalLabel = '💾 Save Video to Phone / Device';
+      const safeFilename = job.filename || 'video.mp4';
+
+      // If already packaged client-side in memory
+      if (job.id && job.id.startsWith('client_') && cachedBlobUrl) {
+        const autoLink = document.createElement('a');
+        autoLink.style.display = 'none';
+        autoLink.href = cachedBlobUrl;
+        autoLink.download = safeFilename;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        setTimeout(() => autoLink.remove(), 1000);
+        if (btnSaveLabel) btnSaveLabel.textContent = '✅ Saved! Tap to Download Again';
+        showToast(`🎉 Saved ${safeFilename} to Downloads`, 'success');
+        return;
+      }
       
       try {
         if (btnSaveLabel) btnSaveLabel.textContent = '⏳ Fetching MP4 for Phone...';
@@ -2264,10 +2445,26 @@
       progressBox.style.display = 'none';
     }
 
+    const btnCancelDownload = document.getElementById('btn-cancel-download');
+    if (btnCancelDownload) {
+      btnCancelDownload.addEventListener('click', () => {
+        if (clientDownloadAbortController) {
+          clientDownloadAbortController.abort();
+          clientDownloadAbortController = null;
+        }
+        showToast('Download cancelled by user', 'info');
+        resetProgress();
+      });
+    }
+
     function resetProgress() {
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      if (clientDownloadAbortController) {
+        clientDownloadAbortController.abort();
+        clientDownloadAbortController = null;
       }
       activeJobId = null;
       progressBox.style.display = 'none';
