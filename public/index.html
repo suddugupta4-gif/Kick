@@ -1141,6 +1141,322 @@
       padding-top: 24px;
     }
 
+    /* App Navigation Tabs (Downloader vs In-Site Media Vault) */
+    .app-nav-tabs {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      background: rgba(18, 24, 36, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 6px;
+    }
+
+    .app-nav-tab {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-muted);
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .app-nav-tab:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .app-nav-tab.active {
+      color: #fff;
+      background: #1e293b;
+      border-color: rgba(83, 252, 24, 0.4);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .vault-count-badge {
+      background: rgba(83, 252, 24, 0.15);
+      color: var(--kick-green);
+      font-size: 11px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(83, 252, 24, 0.3);
+    }
+
+    /* In-Site Media Player Container */
+    .insite-player-card {
+      background: linear-gradient(180deg, #161f30 0%, #0f1522 100%);
+      border: 1px solid rgba(83, 252, 24, 0.4);
+      border-radius: var(--radius-xl);
+      padding: 20px;
+      margin-top: 18px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(83, 252, 24, 0.1);
+      display: none;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .insite-player-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .insite-player-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(83, 252, 24, 0.15);
+      color: var(--kick-green);
+      border: 1px solid rgba(83, 252, 24, 0.3);
+    }
+
+    .insite-video-wrapper {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+      margin-bottom: 16px;
+      aspect-ratio: 16 / 9;
+    }
+
+    .insite-video-player {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      outline: none;
+      background: #000;
+    }
+
+    .insite-audio-wrapper {
+      background: #0b0f17;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .insite-audio-player {
+      width: 100%;
+      height: 40px;
+      outline: none;
+    }
+
+    .player-action-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .btn-player-action {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+
+    .btn-player-action:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .btn-player-action.highlight {
+      background: rgba(83, 252, 24, 0.15);
+      border-color: rgba(83, 252, 24, 0.4);
+      color: var(--kick-green);
+    }
+
+    .btn-player-action.highlight:hover {
+      background: rgba(83, 252, 24, 0.25);
+    }
+
+    /* In-Site Media Vault View */
+    .vault-view {
+      display: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 24px;
+      margin-bottom: 28px;
+    }
+
+    .vault-view-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .vault-title {
+      font-size: 20px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .vault-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .vault-card {
+      background: #0d121c;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.2s ease;
+    }
+
+    .vault-card:hover {
+      border-color: rgba(83, 252, 24, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .vault-card-thumb {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #050810;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .vault-card-thumb video, .vault-card-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .vault-card-play-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+
+    .vault-card-thumb:hover .vault-card-play-overlay {
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .vault-play-btn-circle {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--kick-green);
+      color: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px var(--kick-glow);
+    }
+
+    .vault-card-body {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: space-between;
+    }
+
+    .vault-card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .vault-card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .vault-card-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .vault-empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text-dim);
+    }
+
+    .vault-empty-icon {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.04);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
+
     /* Mobile Responsive Optimizations for Result Card */
     @media (max-width: 640px) {
       .result-card {
@@ -1195,6 +1511,92 @@
       .metric-val {
         font-size: 13px;
       }
+      .player-action-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* YouTube Cookie Assistant Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 16px;
+      animation: fadeIn 0.2s ease-out;
+    }
+    .modal-box {
+      background: #0d131f;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      max-width: 620px;
+      width: 100%;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(255, 0, 0, 0.15);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      max-height: 90vh;
+    }
+    .modal-header {
+      padding: 18px 22px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .modal-body {
+      padding: 22px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .cookie-textarea {
+      width: 100%;
+      height: 140px;
+      background: #06090f;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      color: #fff;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 12px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .cookie-textarea:focus {
+      border-color: var(--kick-green);
+    }
+    .cookie-step-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+    .cookie-step-card strong {
+      color: #fff;
+    }
+    .modal-footer {
+      padding: 16px 22px;
+      background: rgba(255, 255, 255, 0.02);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
     }
   </style>
 </head>
@@ -1233,8 +1635,25 @@
         <span class="badge-pill badge-yt">
           <span class="live-dot"></span> YouTube
         </span>
+        <button type="button" class="badge-pill" id="btn-open-cookie-modal" style="background: rgba(255, 68, 68, 0.12); border: 1px solid rgba(255, 68, 68, 0.35); color: #ff7777; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+          <span id="cookie-status-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #ffaa00;"></span>
+          <span id="cookie-btn-label">🍪 YouTube Cookies</span>
+        </button>
       </div>
     </header>
+
+    <!-- App Navigation Tabs (Downloader vs In-Site Media Vault) -->
+    <nav class="app-nav-tabs" id="app-nav-tabs">
+      <button type="button" class="app-nav-tab active" id="tab-nav-downloader">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Media Downloader</span>
+      </button>
+      <button type="button" class="app-nav-tab" id="tab-nav-vault">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+        <span>In-Site Media Vault</span>
+        <span class="vault-count-badge" id="vault-count-badge">0</span>
+      </button>
+    </nav>
 
     <!-- Hero Header -->
     <section class="hero-section" id="hero-header">
@@ -1317,6 +1736,11 @@
           <div class="error-title" id="error-title">Detection Failed</div>
           <div class="error-msg" id="error-msg">Something went wrong.</div>
         </div>
+      </div>
+      <div id="error-cookie-action" style="display: none; width: 100%; border-top: 1px solid rgba(255, 68, 68, 0.25); padding-top: 10px; margin-top: 4px;">
+        <button type="button" id="btn-fix-yt-cookies" class="btn-download-primary" style="background: #ef4444; height: 38px; font-size: 13px; padding: 0 16px; width: auto; display: inline-flex; align-items: center; gap: 8px;">
+          <span>🍪 Setup YouTube Cookies (Bypass Bot Check)</span>
+        </button>
       </div>
       <div id="error-suggestions" style="display: none; width: 100%; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; margin-top: 4px;">
         <div style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;" id="error-suggestions-title">
@@ -1439,20 +1863,94 @@
           </div>
         </div>
 
-        <!-- Finish Download Direct Button -->
-        <div id="completed-actions" style="display: none; margin-top: 16px; background: rgba(83, 252, 24, 0.08); border: 1px solid rgba(83, 252, 24, 0.3); border-radius: var(--radius-lg); padding: 14px; text-align: center;">
-          <div style="font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--kick-green)" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            <span>Video Packaged & Ready!</span>
+        <!-- In-Site Media Player Card (Plays and manages files right on the site) -->
+        <div class="insite-player-card" id="insite-player-card">
+          <div class="insite-player-header">
+            <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
+              <span class="insite-player-badge" id="insite-media-badge">🎬 Ready on Site</span>
+              <span id="insite-media-title" style="font-weight: 700; font-size: 14px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Media File</span>
+            </div>
+            <span id="insite-media-size" style="font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">0 B</span>
           </div>
-          <a href="#" id="btn-save-finished-file" class="btn-download-primary" style="text-decoration: none; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 700;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            <span id="btn-save-file-label">💾 Save Video to Phone / Device</span>
-          </a>
-          <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
-            Tap the green button above to save the MP4 directly into your phone's <strong>Downloads</strong> or <strong>Files</strong> folder.
+
+          <!-- In-Site Video Player -->
+          <div class="insite-video-wrapper" id="insite-video-box" style="display: none;">
+            <video class="insite-video-player" id="insite-video-player" controls playsinline preload="metadata">
+              Your browser does not support HTML5 video streaming.
+            </video>
+          </div>
+
+          <!-- In-Site Audio Player -->
+          <div class="insite-audio-wrapper" id="insite-audio-box" style="display: none;">
+            <div style="font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              <span>Playing In-Site Audio Track (MP3)</span>
+            </div>
+            <audio class="insite-audio-player" id="insite-audio-player" controls preload="metadata">
+              Your browser does not support HTML5 audio streaming.
+            </audio>
+          </div>
+
+          <!-- In-Site Player Action Buttons -->
+          <div class="player-action-grid">
+            <button type="button" class="btn-player-action highlight" id="btn-save-to-device">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="btn-save-device-label">Save to Phone/PC</span>
+            </button>
+            <button type="button" class="btn-player-action" id="btn-copy-insite-stream">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              <span>Copy Stream Link</span>
+            </button>
+            <button type="button" class="btn-player-action" id="btn-open-vault-view">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+              <span>In-Site Media Vault</span>
+            </button>
+            <button type="button" class="btn-player-action" id="btn-new-download-action">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              <span>New Download</span>
+            </button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- In-Site Media Vault View (Stored and downloaded media library) -->
+    <section class="vault-view" id="vault-view">
+      <div class="vault-view-header">
+        <div class="vault-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--kick-green)" stroke-width="2.5"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+          <span>In-Site Media Vault</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="btn-secondary-action" id="btn-refresh-vault" style="padding: 6px 12px; font-size: 12px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            Refresh Library
+          </button>
+        </div>
+      </div>
+
+      <!-- In-Site Media Vault Active Player (when tapping an item from vault) -->
+      <div id="vault-player-container" style="display: none; margin-bottom: 20px; background: #070a10; border: 1px solid rgba(83, 252, 24, 0.4); border-radius: var(--radius-lg); padding: 14px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 14px; color: #fff; display: flex; align-items: center; gap: 6px;">
+            <span style="color: var(--kick-green);">▶ Playing:</span>
+            <span id="vault-player-title">Media</span>
+          </div>
+          <button type="button" id="btn-close-vault-player" style="background: rgba(255, 255, 255, 0.08); border: none; color: var(--text-muted); font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 4px; cursor: pointer;">
+            ✕ Close Player
+          </button>
+        </div>
+        <div id="vault-video-box" style="display: none; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 10px;">
+          <video id="vault-video-player" controls playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
+        </div>
+        <div id="vault-audio-box" style="display: none; padding: 8px; background: #0c111a; border-radius: 8px; margin-bottom: 10px;">
+          <audio id="vault-audio-player" controls style="width: 100%;"></audio>
+        </div>
+      </div>
+
+      <!-- Vault Cards Grid -->
+      <div class="vault-grid" id="vault-grid">
+        <!-- Rendered dynamically -->
       </div>
     </section>
 
@@ -1529,6 +2027,75 @@
       StreamDrop — Fast & Lightweight Media Utility. Deploy-ready for Vercel Free Serverless & Render Docker.
     </footer>
 
+  </div>
+
+  <!-- YouTube Cookie Assistant Modal (Bypasses "Sign in to confirm you're not a bot" detection) -->
+  <div class="modal-overlay" id="cookie-modal-overlay">
+    <div class="modal-box" id="cookie-modal">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 34px; height: 34px; border-radius: 8px; background: rgba(255, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+            🍪
+          </div>
+          <div>
+            <div style="font-weight: 800; font-size: 16px; color: #fff;">YouTube Cookie Assistant</div>
+            <div style="font-size: 12px; color: var(--text-dim);">Bypass "Sign in to confirm you're not a bot" restrictions</div>
+          </div>
+        </div>
+        <button type="button" id="btn-close-cookie-modal" style="background: rgba(255,255,255,0.06); border: none; color: #fff; font-size: 16px; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+          ✕
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 14px;">
+          <span style="font-size: 13px; color: var(--text-muted);">Current Server Status:</span>
+          <span id="modal-cookie-status" style="font-size: 12px; font-weight: 700; color: #ffaa00; display: inline-flex; align-items: center; gap: 6px;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #ffaa00;"></span> Checking...
+          </span>
+        </div>
+
+        <div class="cookie-step-card">
+          <div style="font-weight: 700; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            <span>ℹ️ Why is this needed?</span>
+          </div>
+          YouTube blocks direct downloads from cloud datacenters with <em>"Sign in to confirm you're not a bot"</em>. Supplying standard Netscape cookies allows `yt-dlp` to download unrestricted 4K/1080p and 320kbps MP3 audio seamlessly.
+        </div>
+
+        <div>
+          <label style="font-size: 13px; font-weight: 700; color: #fff; display: block; margin-bottom: 6px;">
+            Paste Netscape format `cookies.txt` content:
+          </label>
+          <textarea class="cookie-textarea" id="cookie-input" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	..."></textarea>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent-blue); cursor: pointer; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); padding: 6px 12px; border-radius: 6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <span>Or upload `cookies.txt` file</span>
+            <input type="file" id="cookie-file-input" accept=".txt" style="display: none;" />
+          </label>
+
+          <span style="font-size: 11px; color: var(--text-dim);">
+            Tip: Export in 5 seconds with Chrome extension <em>"Get cookies.txt LOCALLY"</em>
+          </span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary-action" id="btn-clear-cookies" style="color: #ff5555; border-color: rgba(255, 85, 85, 0.3); font-size: 12px; padding: 8px 14px;">
+          🗑 Clear Cookies
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn-secondary-action" id="btn-cancel-cookie-modal" style="font-size: 13px; padding: 8px 16px;">
+            Cancel
+          </button>
+          <button type="button" class="btn-download-primary" id="btn-save-cookies" style="min-width: 140px; height: 38px; font-size: 13px; padding: 0 18px;">
+            💾 Save Cookies
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1623,6 +2190,13 @@
       const suggestionsBox = document.getElementById('error-suggestions');
       const suggestionsGrid = document.getElementById('error-suggestions-grid');
       const suggestionsTitle = document.getElementById('error-suggestions-title');
+      const errorCookieAction = document.getElementById('error-cookie-action');
+
+      // Check if YouTube bot verification or cookie error
+      const isBotError = /bot|cookie|Sign in to confirm|authentication/i.test(message);
+      if (errorCookieAction) {
+        errorCookieAction.style.display = isBotError ? 'block' : 'none';
+      }
 
       if (availableVods && availableVods.length > 0) {
         suggestionsTitle.innerHTML = `Active streams from <strong>${channelSlug || 'this streamer'}</strong> (click to download):`;
@@ -1670,6 +2244,155 @@
       errorBanner.style.display = 'none';
       const suggestionsBox = document.getElementById('error-suggestions');
       if (suggestionsBox) suggestionsBox.style.display = 'none';
+      const errorCookieAction = document.getElementById('error-cookie-action');
+      if (errorCookieAction) errorCookieAction.style.display = 'none';
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // YouTube Cookie Assistant Controller
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const cookieModalOverlay = document.getElementById('cookie-modal-overlay');
+    const btnOpenCookieModal = document.getElementById('btn-open-cookie-modal');
+    const btnCloseCookieModal = document.getElementById('btn-close-cookie-modal');
+    const btnCancelCookieModal = document.getElementById('btn-cancel-cookie-modal');
+    const btnFixYtCookies = document.getElementById('btn-fix-yt-cookies');
+    const btnSaveCookies = document.getElementById('btn-save-cookies');
+    const btnClearCookies = document.getElementById('btn-clear-cookies');
+    const cookieInput = document.getElementById('cookie-input');
+    const cookieFileInput = document.getElementById('cookie-file-input');
+    const cookieStatusDot = document.getElementById('cookie-status-dot');
+    const cookieBtnLabel = document.getElementById('cookie-btn-label');
+    const modalCookieStatus = document.getElementById('modal-cookie-status');
+
+    function openCookieModal() {
+      if (cookieModalOverlay) {
+        cookieModalOverlay.style.display = 'flex';
+        checkCookieStatus();
+      }
+    }
+
+    function closeCookieModal() {
+      if (cookieModalOverlay) {
+        cookieModalOverlay.style.display = 'none';
+      }
+    }
+
+    if (btnOpenCookieModal) btnOpenCookieModal.addEventListener('click', openCookieModal);
+    if (btnCloseCookieModal) btnCloseCookieModal.addEventListener('click', closeCookieModal);
+    if (btnCancelCookieModal) btnCancelCookieModal.addEventListener('click', closeCookieModal);
+    if (btnFixYtCookies) btnFixYtCookies.addEventListener('click', openCookieModal);
+
+    // Click outside to close
+    if (cookieModalOverlay) {
+      cookieModalOverlay.addEventListener('click', (e) => {
+        if (e.target === cookieModalOverlay) closeCookieModal();
+      });
+    }
+
+    async function checkCookieStatus() {
+      try {
+        const res = await fetch('/api/cookies/youtube');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.configured) {
+            if (cookieStatusDot) cookieStatusDot.style.background = '#53fc18';
+            if (cookieBtnLabel) cookieBtnLabel.textContent = '🍪 Cookies Active';
+            if (btnOpenCookieModal) {
+              btnOpenCookieModal.style.background = 'rgba(83, 252, 24, 0.12)';
+              btnOpenCookieModal.style.borderColor = 'rgba(83, 252, 24, 0.35)';
+              btnOpenCookieModal.style.color = 'var(--kick-green)';
+            }
+            if (modalCookieStatus) {
+              modalCookieStatus.innerHTML = '<span style="width: 6px; height: 6px; border-radius: 50%; background: #53fc18;"></span> Active (Cookies loaded & ready)';
+              modalCookieStatus.style.color = '#53fc18';
+            }
+          } else {
+            if (cookieStatusDot) cookieStatusDot.style.background = '#ffaa00';
+            if (cookieBtnLabel) cookieBtnLabel.textContent = '🍪 YouTube Cookies';
+            if (btnOpenCookieModal) {
+              btnOpenCookieModal.style.background = 'rgba(255, 68, 68, 0.12)';
+              btnOpenCookieModal.style.borderColor = 'rgba(255, 68, 68, 0.35)';
+              btnOpenCookieModal.style.color = '#ff7777';
+            }
+            if (modalCookieStatus) {
+              modalCookieStatus.innerHTML = '<span style="width: 6px; height: 6px; border-radius: 50%; background: #ffaa00;"></span> No cookies saved (Default)';
+              modalCookieStatus.style.color = '#ffaa00';
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    checkCookieStatus();
+
+    // File input reader
+    if (cookieFileInput) {
+      cookieFileInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (re) => {
+          if (cookieInput) {
+            cookieInput.value = re.target?.result || '';
+            showToast('📄 cookies.txt loaded into editor', 'info');
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    // Save cookies
+    if (btnSaveCookies) {
+      btnSaveCookies.addEventListener('click', async () => {
+        const text = (cookieInput ? cookieInput.value : '').trim();
+        if (!text || text.length < 10) {
+          showToast('Please paste valid cookies.txt content', 'error');
+          return;
+        }
+
+        btnSaveCookies.disabled = true;
+        btnSaveCookies.textContent = 'Saving...';
+
+        try {
+          const res = await fetch('/api/cookies/youtube', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookies: text })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to save cookies');
+
+          showToast('🎉 YouTube cookies saved successfully! Bot verification bypassed.', 'success');
+          checkCookieStatus();
+          closeCookieModal();
+          clearError();
+
+          // If there is an active YouTube URL in input, auto-detect or retry
+          if (urlInput && urlInput.value.trim() && /youtu/i.test(urlInput.value)) {
+            detectUrl();
+          }
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          btnSaveCookies.disabled = false;
+          btnSaveCookies.textContent = '💾 Save Cookies';
+        }
+      });
+    }
+
+    // Clear cookies
+    if (btnClearCookies) {
+      btnClearCookies.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to clear saved YouTube cookies?')) return;
+        try {
+          await fetch('/api/cookies/youtube', { method: 'DELETE' });
+          if (cookieInput) cookieInput.value = '';
+          showToast('YouTube cookies removed', 'info');
+          checkCookieStatus();
+        } catch (e) {
+          showToast('Failed to clear cookies', 'error');
+        }
+      });
     }
 
     // Input handlers
@@ -2574,20 +3297,13 @@
         }
         cachedBlobUrl = window.URL.createObjectURL(fileBlob);
 
-        const autoLink = document.createElement('a');
-        autoLink.style.display = 'none';
-        autoLink.href = cachedBlobUrl;
-        autoLink.download = filename;
-        document.body.appendChild(autoLink);
-        autoLink.click();
-        setTimeout(() => autoLink.remove(), 2000);
-
         lastFinishedJob = {
           id: 'client_' + Date.now(),
           filename: filename,
           status: 'completed',
           size: formatBytesClient(totalBytes),
-          speed: metricSpeed.textContent
+          speed: metricSpeed.textContent,
+          type: 'video'
         };
 
         progressStatusLabel.textContent = '✅ Download Completed!';
@@ -2595,10 +3311,11 @@
         metricEta.textContent = '00:00';
         metricSize.textContent = formatBytesClient(totalBytes);
         metricSpeed.textContent = 'Done';
-        completedActions.style.display = 'block';
         btnStartDownload.disabled = false;
 
-        showToast(`🎉 Download complete: ${filename}`, 'success');
+        showInSitePlayer(lastFinishedJob, cachedBlobUrl);
+        showToast(`🎉 Ready on site: ${filename}`, 'success');
+        refreshVaultCount();
 
       } catch (err) {
         clearInterval(downloadMetricTicker);
@@ -2795,16 +3512,176 @@
       }
     }
 
-    let lastFinishedJob = null;
-    let cachedBlobUrl = null;
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // In-Site Media Player & Media Vault System
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const tabNavDownloader = document.getElementById('tab-nav-downloader');
+    const tabNavVault = document.getElementById('tab-nav-vault');
+    const inputContainer = document.getElementById('input-container');
+    const heroHeader = document.getElementById('hero-header');
+    const infoGrid = document.getElementById('info-grid');
+    const vaultView = document.getElementById('vault-view');
+    const vaultGrid = document.getElementById('vault-grid');
+    const vaultCountBadge = document.getElementById('vault-count-badge');
+    const btnRefreshVault = document.getElementById('btn-refresh-vault');
+
+    const insitePlayerCard = document.getElementById('insite-player-card');
+    const insiteMediaTitle = document.getElementById('insite-media-title');
+    const insiteMediaSize = document.getElementById('insite-media-size');
+    const insiteMediaBadge = document.getElementById('insite-media-badge');
+    const insiteVideoBox = document.getElementById('insite-video-box');
+    const insiteVideoPlayer = document.getElementById('insite-video-player');
+    const insiteAudioBox = document.getElementById('insite-audio-box');
+    const insiteAudioPlayer = document.getElementById('insite-audio-player');
+    const btnSaveToDevice = document.getElementById('btn-save-to-device');
+    const btnSaveDeviceLabel = document.getElementById('btn-save-device-label');
+    const btnCopyInsiteStream = document.getElementById('btn-copy-insite-stream');
+    const btnOpenVaultView = document.getElementById('btn-open-vault-view');
+    const btnNewDownloadAction = document.getElementById('btn-new-download-action');
+
+    const vaultPlayerContainer = document.getElementById('vault-player-container');
+    const vaultPlayerTitle = document.getElementById('vault-player-title');
+    const vaultVideoBox = document.getElementById('vault-video-box');
+    const vaultVideoPlayer = document.getElementById('vault-video-player');
+    const vaultAudioBox = document.getElementById('vault-audio-box');
+    const vaultAudioPlayer = document.getElementById('vault-audio-player');
+    const btnCloseVaultPlayer = document.getElementById('btn-close-vault-player');
+
+    let activeInsiteStreamUrl = '';
+
+    // Switch to Downloader View
+    tabNavDownloader.addEventListener('click', () => {
+      tabNavDownloader.classList.add('active');
+      tabNavVault.classList.remove('active');
+      heroHeader.style.display = 'block';
+      inputContainer.style.display = 'block';
+      if (currentMedia) resultCard.style.display = 'block';
+      if (infoGrid) infoGrid.style.display = 'grid';
+      vaultView.style.display = 'none';
+      if (vaultVideoPlayer) vaultVideoPlayer.pause();
+      if (vaultAudioPlayer) vaultAudioPlayer.pause();
+    });
+
+    // Switch to In-Site Media Vault View
+    tabNavVault.addEventListener('click', () => {
+      tabNavVault.classList.add('active');
+      tabNavDownloader.classList.remove('active');
+      heroHeader.style.display = 'none';
+      inputContainer.style.display = 'none';
+      resultCard.style.display = 'none';
+      if (offlineView) offlineView.style.display = 'none';
+      if (infoGrid) infoGrid.style.display = 'none';
+      vaultView.style.display = 'block';
+      if (insiteVideoPlayer) insiteVideoPlayer.pause();
+      if (insiteAudioPlayer) insiteAudioPlayer.pause();
+      loadMediaVault();
+    });
+
+    btnOpenVaultView.addEventListener('click', () => {
+      tabNavVault.click();
+    });
+
+    btnNewDownloadAction.addEventListener('click', () => {
+      resetProgress();
+      if (insiteVideoPlayer) {
+        insiteVideoPlayer.pause();
+        insiteVideoPlayer.src = '';
+      }
+      if (insiteAudioPlayer) {
+        insiteAudioPlayer.pause();
+        insiteAudioPlayer.src = '';
+      }
+      insitePlayerCard.style.display = 'none';
+      urlInput.value = '';
+      btnClear.style.display = 'none';
+      resultCard.style.display = 'none';
+      urlInput.focus();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    btnRefreshVault.addEventListener('click', () => {
+      loadMediaVault();
+      showToast('Vault refreshed', 'info');
+    });
+
+    if (btnCloseVaultPlayer) {
+      btnCloseVaultPlayer.addEventListener('click', () => {
+        if (vaultVideoPlayer) {
+          vaultVideoPlayer.pause();
+          vaultVideoPlayer.src = '';
+        }
+        if (vaultAudioPlayer) {
+          vaultAudioPlayer.pause();
+          vaultAudioPlayer.src = '';
+        }
+        vaultPlayerContainer.style.display = 'none';
+      });
+    }
+
+    // Display In-Site Interactive Player
+    function showInSitePlayer(job, streamUrl) {
+      if (!job) return;
+      lastFinishedJob = job;
+      const isAudio = (job.filename && job.filename.endsWith('.mp3')) || job.type === 'youtube_audio' || job.type === 'audio';
+      const safeStreamUrl = streamUrl || `/api/stream/${job.id}`;
+      activeInsiteStreamUrl = safeStreamUrl;
+
+      insiteMediaTitle.textContent = job.title || job.filename || 'Downloaded Media';
+      insiteMediaSize.textContent = job.size || '0 B';
+      insiteMediaBadge.textContent = isAudio ? '🎵 MP3 Audio Ready' : '🎬 MP4 Video Ready';
+
+      if (isAudio) {
+        insiteVideoBox.style.display = 'none';
+        if (insiteVideoPlayer) {
+          insiteVideoPlayer.pause();
+          insiteVideoPlayer.src = '';
+        }
+        insiteAudioBox.style.display = 'flex';
+        insiteAudioPlayer.src = safeStreamUrl;
+        insiteAudioPlayer.load();
+        insiteAudioPlayer.play().catch(() => {});
+      } else {
+        insiteAudioBox.style.display = 'none';
+        if (insiteAudioPlayer) {
+          insiteAudioPlayer.pause();
+          insiteAudioPlayer.src = '';
+        }
+        insiteVideoBox.style.display = 'block';
+        insiteVideoPlayer.src = safeStreamUrl;
+        insiteVideoPlayer.load();
+        insiteVideoPlayer.play().catch(() => {});
+      }
+
+      insitePlayerCard.style.display = 'block';
+      insitePlayerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // Save to Phone / PC Downloads Folder on demand
+    btnSaveToDevice.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!lastFinishedJob) {
+        showToast('No active media to save.', 'error');
+        return;
+      }
+      triggerBlobDownload(lastFinishedJob);
+    });
+
+    btnCopyInsiteStream.addEventListener('click', async () => {
+      const copyUrl = activeInsiteStreamUrl ? (activeInsiteStreamUrl.startsWith('http') ? activeInsiteStreamUrl : `${window.location.origin}${activeInsiteStreamUrl}`) : window.location.href;
+      try {
+        await navigator.clipboard.writeText(copyUrl);
+        showToast('📋 Stream URL copied to clipboard! (Ready for VLC or streaming player)', 'success');
+      } catch (e) {
+        showToast('Copy failed, please copy manually', 'error');
+      }
+    });
 
     async function triggerBlobDownload(job) {
       if (!job) return;
-      const btnSaveLabel = document.getElementById('btn-save-file-label');
-      const safeFilename = job.filename || 'video.mp4';
+      const safeFilename = job.filename || 'media_download.mp4';
 
-      // 1. If already packaged client-side in memory
-      if (job.id && job.id.startsWith('client_') && cachedBlobUrl) {
+      // 1. If client-side memory blob
+      if (job.id && String(job.id).startsWith('client_') && cachedBlobUrl) {
         const autoLink = document.createElement('a');
         autoLink.style.display = 'none';
         autoLink.href = cachedBlobUrl;
@@ -2812,45 +3689,184 @@
         document.body.appendChild(autoLink);
         autoLink.click();
         setTimeout(() => autoLink.remove(), 1000);
-        if (btnSaveLabel) btnSaveLabel.textContent = '✅ Saved! Tap to Download Again';
-        showToast(`🎉 Saved ${safeFilename} to Downloads`, 'success');
+        showToast(`💾 Saved ${safeFilename} to device Downloads`, 'success');
         return;
       }
-      
-      const fileUrl = `/api/file/${job.id}`;
 
-      // Update the button directly so manual taps always work with 100% certainty
-      if (btnSaveFinishedFile) {
-        btnSaveFinishedFile.href = fileUrl;
-        btnSaveFinishedFile.setAttribute('download', safeFilename);
-        btnSaveFinishedFile.setAttribute('target', '_blank');
-      }
-
-      // 2. Trigger automatic download via dynamic anchor
+      // 2. Server file download endpoint
+      const downloadUrl = `/api/file/${job.id}?download=true`;
       const autoLink = document.createElement('a');
       autoLink.style.display = 'none';
-      autoLink.href = fileUrl;
+      autoLink.href = downloadUrl;
       autoLink.setAttribute('download', safeFilename);
       autoLink.setAttribute('target', '_blank');
       document.body.appendChild(autoLink);
       autoLink.click();
       setTimeout(() => autoLink.remove(), 2000);
 
-      // 3. Fallback invisible iframe trigger for mobile browsers
-      try {
-        let dlFrame = document.getElementById('hidden-download-frame');
-        if (!dlFrame) {
-          dlFrame = document.createElement('iframe');
-          dlFrame.id = 'hidden-download-frame';
-          dlFrame.style.display = 'none';
-          document.body.appendChild(dlFrame);
-        }
-        dlFrame.src = fileUrl;
-      } catch (e) {}
-
-      if (btnSaveLabel) btnSaveLabel.textContent = '💾 Tap to Download MP4 Again';
-      showToast(`🎉 Video ready! Downloading ${safeFilename}`, 'success');
+      showToast(`💾 Saving ${safeFilename} to your device...`, 'success');
     }
+
+    // Load In-Site Media Vault items
+    async function loadMediaVault() {
+      try {
+        const res = await fetch('/api/downloads');
+        if (!res.ok) throw new Error('Could not fetch media library');
+        const data = await res.json();
+        const list = data.downloads || [];
+
+        vaultCountBadge.textContent = list.length;
+
+        if (list.length === 0) {
+          vaultGrid.innerHTML = `
+            <div class="vault-empty-state" style="grid-column: 1 / -1;">
+              <div class="vault-empty-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+              </div>
+              <h3 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 6px;">Your In-Site Media Vault is Empty</h3>
+              <p style="font-size: 13px; color: var(--text-muted); max-width: 400px; margin: 0 auto 16px;">
+                When you download or record videos and audio tracks, they are safely kept in your site vault so you can watch and listen anytime.
+              </p>
+              <button type="button" class="btn-player-action highlight" onclick="document.getElementById('tab-nav-downloader').click();">
+                ⚡ Go to Downloader
+              </button>
+            </div>
+          `;
+          return;
+        }
+
+        vaultGrid.innerHTML = '';
+        list.forEach(item => {
+          const isAudio = item.type === 'audio' || (item.filename && item.filename.endsWith('.mp3'));
+          const card = document.createElement('div');
+          card.className = 'vault-card';
+
+          const timeStr = item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently';
+
+          card.innerHTML = `
+            <div class="vault-card-thumb" data-action="play">
+              ${isAudio ? `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--accent-blue); padding: 20px;">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Audio Track (MP3)</span>
+                </div>
+              ` : `
+                <video src="${item.streamUrl}#t=1" preload="metadata" style="width: 100%; height: 100%; object-fit: cover;"></video>
+              `}
+              <div class="vault-card-play-overlay">
+                <div class="vault-play-btn-circle">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="vault-card-body">
+              <div class="vault-card-title" title="${item.title || item.filename}">${item.title || item.filename}</div>
+              <div class="vault-card-meta">
+                <span>${item.size} • ${isAudio ? 'MP3' : 'MP4'}</span>
+                <span>${timeStr}</span>
+              </div>
+              <div class="vault-card-actions">
+                <button type="button" class="btn-player-action highlight" data-action="play" style="font-size: 12px; padding: 7px 10px;">
+                  ▶ Play
+                </button>
+                <button type="button" class="btn-player-action" data-action="save" style="font-size: 12px; padding: 7px 10px;">
+                  💾 Save
+                </button>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 6px;">
+                <button type="button" data-action="copy" style="background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                  📋 Copy Link
+                </button>
+                <button type="button" data-action="delete" style="background: none; border: none; color: #ef4444; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                  🗑 Delete
+                </button>
+              </div>
+            </div>
+          `;
+
+          // Event handlers for vault card actions
+          card.querySelectorAll('[data-action="play"]').forEach(el => {
+            el.addEventListener('click', () => {
+              playVaultItem(item);
+            });
+          });
+
+          card.querySelector('[data-action="save"]').addEventListener('click', () => {
+            triggerBlobDownload(item);
+          });
+
+          card.querySelector('[data-action="copy"]').addEventListener('click', async () => {
+            try {
+              const fullUrl = `${window.location.origin}${item.streamUrl}`;
+              await navigator.clipboard.writeText(fullUrl);
+              showToast('📋 Direct stream URL copied to clipboard!', 'success');
+            } catch (e) {
+              showToast('Copy failed', 'error');
+            }
+          });
+
+          card.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+            if (!confirm(`Are you sure you want to delete "${item.title || item.filename}" from the site?`)) return;
+            try {
+              const dRes = await fetch(`/api/downloads/${item.id}`, { method: 'DELETE' });
+              if (!dRes.ok) throw new Error('Delete failed');
+              showToast('File removed from site', 'info');
+              loadMediaVault();
+            } catch (e) {
+              showToast('Could not delete file', 'error');
+            }
+          });
+
+          vaultGrid.appendChild(card);
+        });
+
+      } catch (err) {
+        console.warn('Vault error:', err.message);
+      }
+    }
+
+    function playVaultItem(item) {
+      vaultPlayerTitle.textContent = item.title || item.filename;
+      const isAudio = item.type === 'audio' || (item.filename && item.filename.endsWith('.mp3'));
+
+      if (isAudio) {
+        vaultVideoBox.style.display = 'none';
+        if (vaultVideoPlayer) {
+          vaultVideoPlayer.pause();
+          vaultVideoPlayer.src = '';
+        }
+        vaultAudioBox.style.display = 'block';
+        vaultAudioPlayer.src = item.streamUrl;
+        vaultAudioPlayer.load();
+        vaultAudioPlayer.play().catch(() => {});
+      } else {
+        vaultAudioBox.style.display = 'none';
+        if (vaultAudioPlayer) {
+          vaultAudioPlayer.pause();
+          vaultAudioPlayer.src = '';
+        }
+        vaultVideoBox.style.display = 'block';
+        vaultVideoPlayer.src = item.streamUrl;
+        vaultVideoPlayer.load();
+        vaultVideoPlayer.play().catch(() => {});
+      }
+
+      vaultPlayerContainer.style.display = 'block';
+      vaultPlayerContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    async function refreshVaultCount() {
+      try {
+        const res = await fetch('/api/downloads');
+        if (res.ok) {
+          const data = await res.json();
+          vaultCountBadge.textContent = (data.downloads || []).length;
+        }
+      } catch (e) {}
+    }
+
+    // Refresh count on page load
+    refreshVaultCount();
 
     function onJobCompleted(job) {
       isLiveRecordingActive = false;
@@ -2866,22 +3882,10 @@
       metricStatus.textContent = 'READY';
 
       lastFinishedJob = job;
-      completedActions.style.display = 'block';
-
-      showToast('🎉 Video ready! Saving MP4 to your device...', 'success');
-
-      // Trigger high-reliability blob download
-      triggerBlobDownload(job);
+      showInSitePlayer(job, `/api/stream/${job.id}`);
+      showToast('🎉 Media ready and playing on site!', 'success');
+      refreshVaultCount();
     }
-
-    btnSaveFinishedFile.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (lastFinishedJob) {
-        triggerBlobDownload(lastFinishedJob);
-      } else {
-        showToast('No active download found. Please start a download first.', 'error');
-      }
-    });
 
     function onJobFailed(job) {
       isLiveRecordingActive = false;
@@ -2930,7 +3934,7 @@
       stopLiveRecordingFn = null;
       activeJobId = null;
       progressBox.style.display = 'none';
-      completedActions.style.display = 'none';
+      if (insitePlayerCard) insitePlayerCard.style.display = 'none';
       progressBarFill.style.width = '0%';
       progressBarFill.style.background = '';
       btnStopRecording.style.display = 'none';

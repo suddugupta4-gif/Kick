@@ -318,26 +318,157 @@ async function parseMasterPlaylist(masterUrl) {
   }
 }
 
-function getYtDlpBin() {
-  const localBin = path.join(__dirname, 'bin', 'yt-dlp');
-  if (fs.existsSync(localBin)) {
-    try { fs.chmodSync(localBin, 0o755); } catch (e) {}
-    return localBin;
+function getNodeBin() {
+  const candidates = ['/usr/local/bin/node', '/usr/bin/node', 'node'];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch (e) {}
   }
-  const tmpBin = '/tmp/yt-dlp';
-  if (fs.existsSync(tmpBin)) {
-    try { fs.chmodSync(tmpBin, 0o755); } catch (e) {}
-    return tmpBin;
+  return 'node';
+}
+
+function getFfmpegBin() {
+  const candidates = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch (e) {}
+  }
+  return 'ffmpeg';
+}
+
+function getYtDlpBin() {
+  const candidates = [
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    path.join(__dirname, 'bin', 'yt-dlp'),
+    '/tmp/yt-dlp'
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) {
+        const stat = fs.statSync(c);
+        if (stat.size > 50000) {
+          try { fs.chmodSync(c, 0o755); } catch (e) {}
+          return c;
+        }
+      }
+    } catch (e) {}
   }
   return 'yt-dlp';
 }
 
+let isEnsuringYtDlp = false;
+async function ensureYtDlpBinary() {
+  const current = getYtDlpBin();
+  if (current !== 'yt-dlp') return current;
+
+  if (isEnsuringYtDlp) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 400));
+      const checked = getYtDlpBin();
+      if (checked !== 'yt-dlp') return checked;
+    }
+    return getYtDlpBin();
+  }
+
+  isEnsuringYtDlp = true;
+  try {
+    const binDir = path.join(__dirname, 'bin');
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    const localBin = path.join(binDir, 'yt-dlp');
+    const tmpBin = '/tmp/yt-dlp';
+    const usrLocalBin = '/usr/local/bin/yt-dlp';
+
+    console.log('[Bootstrap] Initializing standalone yt-dlp binary engine...');
+    const response = await axios({
+      method: 'GET',
+      url: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
+      responseType: 'stream',
+      maxRedirects: 5,
+      timeout: 45000
+    });
+
+    const writer = fs.createWriteStream(localBin);
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
+    try { fs.chmodSync(localBin, 0o755); } catch (e) {}
+    try {
+      fs.copyFileSync(localBin, tmpBin);
+      fs.chmodSync(tmpBin, 0o755);
+    } catch (e) {}
+    try {
+      fs.copyFileSync(localBin, usrLocalBin);
+      fs.chmodSync(usrLocalBin, 0o755);
+    } catch (e) {}
+
+    console.log('[Bootstrap] Standalone yt-dlp binary ready and executable!');
+    isEnsuringYtDlp = false;
+    return getYtDlpBin();
+  } catch (err) {
+    console.warn('[Bootstrap] Auto-download of yt-dlp failed:', err.message);
+    isEnsuringYtDlp = false;
+    return getYtDlpBin();
+  }
+}
+
+function getYoutubeCookiesPath() {
+  // 1. Check environment variable
+  if (process.env.YOUTUBE_COOKIES && process.env.YOUTUBE_COOKIES.trim().length > 10) {
+    const envCookiePath = '/tmp/yt_env_cookies.txt';
+    try {
+      fs.writeFileSync(envCookiePath, process.env.YOUTUBE_COOKIES.trim(), 'utf8');
+      return envCookiePath;
+    } catch (e) {}
+  }
+  // 2. Project local cookies.txt
+  const localCookies = path.join(__dirname, 'cookies.txt');
+  if (fs.existsSync(localCookies)) {
+    try {
+      const st = fs.statSync(localCookies);
+      if (st.size > 10) return localCookies;
+    } catch (e) {}
+  }
+  // 3. /tmp/youtube_cookies.txt
+  const tmpCookies = '/tmp/youtube_cookies.txt';
+  if (fs.existsSync(tmpCookies)) {
+    try {
+      const st = fs.statSync(tmpCookies);
+      if (st.size > 10) return tmpCookies;
+    } catch (e) {}
+  }
+  return null;
+}
+
 // Execute yt-dlp --dump-json with serverless fallback
-function getYoutubeInfo(url) {
+async function getYoutubeInfo(url) {
+  const ytBin = await ensureYtDlpBinary();
+  const ffmpegBin = getFfmpegBin();
+  const nodeBin = getNodeBin();
+  const cookiePath = getYoutubeCookiesPath();
+
   return new Promise((resolve, reject) => {
-    const ytBin = getYtDlpBin();
-    const args = ['--dump-json', '--no-playlist', '--no-warnings', url];
-    execFile(ytBin, args, { maxBuffer: 10 * 1024 * 1024 }, async (err, stdout, stderr) => {
+    const args = [
+      '--dump-json',
+      '--no-playlist',
+      '--no-warnings',
+      '--ffmpeg-location', ffmpegBin,
+      '--js-runtimes', `node:${nodeBin}`
+    ];
+
+    if (cookiePath) {
+      args.push('--cookies', cookiePath);
+    }
+
+    args.push(url);
+
+    execFile(ytBin, args, { maxBuffer: 15 * 1024 * 1024, timeout: 35000 }, async (err, stdout, stderr) => {
       if (!err && stdout) {
         try {
           const info = JSON.parse(stdout);
@@ -1053,13 +1184,18 @@ async function runNativeLiveStreamRecording(streamUrl, filepath, job) {
 }
 
 // Execute Kick Stream Download / Recording using FFmpeg with pure Node.js fallback
-function runKickVodYtDlpDownload(playlistUrl, filepath, job, totalDuration, targetQuality = '') {
+async function runKickVodYtDlpDownload(playlistUrl, filepath, job, totalDuration, targetQuality = '') {
+  const ytBin = await ensureYtDlpBinary();
+  const ffmpegBin = getFfmpegBin();
+  const nodeBin = getNodeBin();
+
   return new Promise((resolve, reject) => {
     try {
-      const ytBin = getYtDlpBin();
       const ytdlpArgs = [
         '--no-warnings',
         '--newline',
+        '--ffmpeg-location', ffmpegBin,
+        '--js-runtimes', `node:${nodeBin}`,
         '--concurrent-fragments', '16',
         '-N', '8',
         '--socket-timeout', '15',
@@ -1594,6 +1730,10 @@ app.post('/api/download/youtube', async (req, res) => {
     return res.status(400).json({ error: 'YouTube URL is required' });
   }
 
+  const ytBin = await ensureYtDlpBinary();
+  const ffmpegBin = getFfmpegBin();
+  const nodeBin = getNodeBin();
+
   const jobId = uuidv4();
   const isAudio = type === 'audio';
   const isLiveStream = Boolean(isLive);
@@ -1623,18 +1763,25 @@ app.post('/api/download/youtube', async (req, res) => {
   jobs.set(jobId, job);
 
   // Build yt-dlp arguments with high-speed multi-threaded acceleration (10x Turbo Engine)
+  const cookiePath = getYoutubeCookiesPath();
   let ytdlpArgs = [
     '--no-warnings',
     '--newline',
+    '--ffmpeg-location', ffmpegBin,
+    '--js-runtimes', `node:${nodeBin}`,
     '--concurrent-fragments', '16',
     '-N', '8',
-    '--socket-timeout', '15',
+    '--socket-timeout', '20',
     '--retries', '20',
     '--fragment-retries', '20',
     '--file-access-retries', '10',
     '--retry-sleep', 'fragment:1',
     '--progress-template', '%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s'
   ];
+
+  if (cookiePath) {
+    ytdlpArgs.push('--cookies', cookiePath);
+  }
 
   if (isAudio) {
     ytdlpArgs.push(
@@ -1656,7 +1803,6 @@ app.post('/api/download/youtube', async (req, res) => {
   }
 
   try {
-    const ytBin = getYtDlpBin();
     const ytdlpProc = spawn(ytBin, ytdlpArgs);
     job.process = ytdlpProc;
 
@@ -1748,7 +1894,10 @@ app.post('/api/download/youtube', async (req, res) => {
 
     ytdlpProc.stderr.on('data', (data) => {
       const msg = data.toString();
-      if (!msg.includes('WARNING') && msg.includes('ERROR')) {
+      if (msg.includes('Sign in to confirm') || msg.includes('not a bot') || msg.includes('cookies')) {
+        job.botBlocked = true;
+        job.error = 'YouTube Bot Protection: YouTube requires authentication cookies for server downloads. Please click "Setup YouTube Cookies" to paste your cookies and unlock downloading.';
+      } else if (!msg.includes('WARNING') && msg.includes('ERROR')) {
         job.error = msg.trim();
       }
     });
@@ -1867,7 +2016,74 @@ app.get('/api/status/:jobId', (req, res) => {
   });
 });
 
-// 8. GET /api/file/:jobId - Stream finished file to browser, then delete it
+// Helper for streaming media with 206 Partial Content / HTTP Range support
+function streamMediaFile(filepath, req, res, filename, forceDownload = false) {
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).send('Media file not found on server or expired.');
+  }
+
+  const stat = fs.statSync(filepath);
+  const fileSize = stat.size;
+  const isAudio = filepath.endsWith('.mp3');
+  const mimeType = isAudio ? 'audio/mpeg' : 'video/mp4';
+  const cleanFilename = (filename || path.basename(filepath)).replace(/[^\w\s.-]/gi, '_');
+  const disposition = forceDownload ? 'attachment' : 'inline';
+
+  const range = req.headers.range;
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (start >= fileSize) {
+      res.status(416).send(`Requested range not satisfiable\n${start} >= ${fileSize}`);
+      return;
+    }
+
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(filepath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': mimeType,
+      'Content-Disposition': `${disposition}; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(filename || cleanFilename)}`,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges',
+      'Cache-Control': 'public, max-age=3600'
+    };
+
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': mimeType,
+      'Accept-Ranges': 'bytes',
+      'Content-Disposition': `${disposition}; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(filename || cleanFilename)}`,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges',
+      'Cache-Control': 'public, max-age=3600'
+    };
+
+    res.writeHead(200, head);
+    fs.createReadStream(filepath).pipe(res);
+  }
+}
+
+// 8. GET /api/stream/:jobId - Stream media file for in-site web player with Range seeking
+app.get('/api/stream/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return res.status(404).send('Download job not found or expired.');
+  }
+
+  return streamMediaFile(job.filepath, req, res, job.filename, false);
+});
+
+// 9. GET /api/file/:jobId - Download or stream finished file
 app.get('/api/file/:jobId', (req, res) => {
   const { jobId } = req.params;
   const job = jobs.get(jobId);
@@ -1876,41 +2092,113 @@ app.get('/api/file/:jobId', (req, res) => {
     return res.status(404).send('Download job not found or expired.');
   }
 
-  if (!fs.existsSync(job.filepath)) {
-    return res.status(404).send('File not found on server or already downloaded.');
+  const forceDownload = req.query.download === 'true' || req.query.download === '1';
+  return streamMediaFile(job.filepath, req, res, job.filename, forceDownload);
+});
+
+// 10. GET /api/downloads - List all saved/downloaded files on the site
+app.get('/api/downloads', (req, res) => {
+  const list = [];
+  for (const [id, job] of jobs.entries()) {
+    if (job.status === 'completed' && fs.existsSync(job.filepath)) {
+      try {
+        const stat = fs.statSync(job.filepath);
+        if (stat.size > 1024) {
+          list.push({
+            id: job.id,
+            title: job.title || job.filename || 'Downloaded Media',
+            filename: job.filename,
+            size: formatBytes(stat.size),
+            rawBytes: stat.size,
+            type: job.type || (job.filename.endsWith('.mp3') ? 'audio' : 'video'),
+            createdAt: job.createdAt || stat.birthtimeMs || Date.now(),
+            streamUrl: `/api/stream/${job.id}`,
+            downloadUrl: `/api/file/${job.id}?download=true`
+          });
+        }
+      } catch (e) {}
+    }
   }
 
-  const stat = fs.statSync(job.filepath);
-  const isAudio = job.filepath.endsWith('.mp3');
-  const mimeType = isAudio ? 'audio/mpeg' : 'video/mp4';
-  const cleanFilename = (job.filename || 'stream.mp4').replace(/[^\w\s.-]/gi, '_');
+  list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return res.json({ downloads: list });
+});
 
-  res.writeHead(200, {
-    'Content-Type': mimeType,
-    'Content-Length': stat.size,
-    'Content-Disposition': `attachment; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(job.filename || cleanFilename)}`,
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    'Expires': '0'
-  });
+// 11. DELETE /api/downloads/:jobId - Delete a saved file from server
+app.delete('/api/downloads/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = jobs.get(jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'Item not found' });
+  }
 
-  const readStream = fs.createReadStream(job.filepath);
-  readStream.pipe(res);
+  try {
+    if (fs.existsSync(job.filepath)) {
+      fs.unlinkSync(job.filepath);
+    }
+    jobs.delete(jobId);
+    return res.json({ ok: true, message: 'File deleted successfully.' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
-  // Keep the file available for 15 minutes so the user can re-download or tap multiple times if needed
-  if (!job.cleanupTimer) {
-    job.cleanupTimer = setTimeout(() => {
-      try {
-        if (fs.existsSync(job.filepath)) {
-          fs.unlinkSync(job.filepath);
-          console.log(`Cleaned up temporary file: ${job.filepath}`);
-        }
-      } catch (err) {
-        console.warn('Failed to delete temp file:', err.message);
-      }
-    }, 15 * 60 * 1000);
+// 12. GET /api/cookies/youtube - Check YouTube cookie status
+app.get('/api/cookies/youtube', (req, res) => {
+  const cookiePath = getYoutubeCookiesPath();
+  if (cookiePath && fs.existsSync(cookiePath)) {
+    try {
+      const stat = fs.statSync(cookiePath);
+      return res.json({
+        configured: true,
+        size: stat.size,
+        path: cookiePath,
+        updatedAt: stat.mtimeMs
+      });
+    } catch (e) {}
+  }
+  return res.json({ configured: false, size: 0 });
+});
+
+// 13. POST /api/cookies/youtube - Save YouTube Netscape cookies.txt content
+app.post('/api/cookies/youtube', (req, res) => {
+  const { cookies } = req.body;
+  if (!cookies || typeof cookies !== 'string' || cookies.trim().length < 10) {
+    return res.status(400).json({ error: 'Please provide valid cookies.txt content.' });
+  }
+
+  try {
+    const cleanCookies = cookies.trim();
+    const localCookies = path.join(__dirname, 'cookies.txt');
+    const tmpCookies = '/tmp/youtube_cookies.txt';
+
+    fs.writeFileSync(localCookies, cleanCookies, 'utf8');
+    try { fs.writeFileSync(tmpCookies, cleanCookies, 'utf8'); } catch (e) {}
+
+    return res.json({
+      ok: true,
+      message: 'YouTube cookies saved successfully! Bot verification bypassed.',
+      size: cleanCookies.length
+    });
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to save cookies: ${err.message}` });
+  }
+});
+
+// 14. DELETE /api/cookies/youtube - Clear saved YouTube cookies
+app.delete('/api/cookies/youtube', (req, res) => {
+  try {
+    const localCookies = path.join(__dirname, 'cookies.txt');
+    const tmpCookies = '/tmp/youtube_cookies.txt';
+    const envCookies = '/tmp/yt_env_cookies.txt';
+
+    if (fs.existsSync(localCookies)) fs.unlinkSync(localCookies);
+    if (fs.existsSync(tmpCookies)) fs.unlinkSync(tmpCookies);
+    if (fs.existsSync(envCookies)) fs.unlinkSync(envCookies);
+
+    return res.json({ ok: true, message: 'YouTube cookies removed.' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -2276,6 +2564,7 @@ if (!process.env.VERCEL) {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 StreamDrop server running on http://0.0.0.0:${PORT}`);
+    ensureYtDlpBinary().catch(e => console.warn('Yt-dlp prewarm warning:', e.message));
   });
 }
 
